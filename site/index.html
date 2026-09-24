@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Beat TabPFN: Rate the Restaurant</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23fbbc04' d='M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">★</span>
+      <div>
+        <div class="brand-title">Beat TabPFN</div>
+        <div class="brand-sub">Guess the Zomato rating of real Bangalore restaurants</div>
+      </div>
+    </div>
+
+    <!-- Filled by app.js: one card for the player, one per model. -->
+    <div class="scoreboard" id="scoreboard" aria-live="polite"></div>
+
+    <div class="top-actions">
+      <button class="ghost" id="how-btn" type="button">How it works</button>
+      <button class="ghost" id="reset-btn" type="button">Reset</button>
+    </div>
+  </header>
+
+  <main class="maps">
+    <!-- Place side panel -->
+    <aside class="panel" id="panel">
+      <div class="searchbox">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+        <input id="search-input" type="text" readonly />
+        <svg viewBox="0 0 24 24" class="ic blue"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14"/></svg>
+      </div>
+
+      <div class="panel-scroll" id="panel-scroll">
+        <div class="hero" id="hero"></div>
+
+        <div class="place-head">
+          <h1 id="p-name"></h1>
+          <div class="rating-row">
+            <span class="rating-num hidden-rating" id="p-rating">?.?</span>
+            <span class="stars" id="p-stars"></span>
+            <span class="votes" id="p-votes"></span>
+          </div>
+          <div class="meta" id="p-meta"></div>
+        </div>
+
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="overview" role="tab">Overview</button>
+          <button class="tab" data-tab="menu" role="tab">Menu</button>
+          <button class="tab" data-tab="reviews" role="tab">Reviews</button>
+        </div>
+
+        <div class="actions">
+          <div class="act"><span class="act-ic primary"><svg viewBox="0 0 24 24"><path d="M21.71 11.29 12.71 2.3a1 1 0 0 0-1.41 0l-9 9a1 1 0 0 0 0 1.41l9 9a1 1 0 0 0 1.41 0l9-9a1 1 0 0 0 0-1.42M14 14.5V12h-4v3H8v-4a1 1 0 0 1 1-1h5V7.5l3.5 3.5z"/></svg></span>Directions</div>
+          <div class="act"><span class="act-ic"><svg viewBox="0 0 24 24"><path d="M17 3H7a2 2 0 0 0-2 2v16l7-3 7 3V5a2 2 0 0 0-2-2m0 15-5-2.18L7 18V5h10z"/></svg></span>Save</div>
+          <div class="act"><span class="act-ic"><svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7m0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5"/></svg></span>Nearby</div>
+          <div class="act"><span class="act-ic"><svg viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11A2.99 2.99 0 1 0 15 5c0 .24.04.47.09.7L8.04 9.81a3 3 0 1 0 0 4.38l7.12 4.16c-.05.21-.08.43-.08.65A2.92 2.92 0 1 0 18 16.08"/></svg></span>Share</div>
+        </div>
+
+        <section class="tab-body" data-body="overview">
+          <ul class="info" id="p-info"></ul>
+          <div class="block" id="dishes-block">
+            <h3>Popular dishes</h3>
+            <div class="chips" id="p-dishes"></div>
+          </div>
+          <div class="block">
+            <h3>Review summary</h3>
+            <div class="review-summary" id="p-summary"></div>
+          </div>
+        </section>
+
+        <section class="tab-body" data-body="menu" hidden>
+          <div class="block"><h3>From the menu</h3><ul class="menu-list" id="p-menu"></ul></div>
+        </section>
+
+        <section class="tab-body" data-body="reviews" hidden>
+          <div class="reviews" id="p-reviews"></div>
+        </section>
+      </div>
+    </aside>
+
+    <!-- Map -->
+    <section class="map-wrap" id="map-wrap">
+      <svg id="map" class="map" xmlns="http://www.w3.org/2000/svg"></svg>
+
+      <div class="map-chips">
+        <span class="mchip">🍽 Restaurants</span><span class="mchip">☕ Cafes</span><span class="mchip">🍺 Bars</span><span class="mchip">🛵 Takeout</span>
+      </div>
+
+      <div class="zoom">
+        <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+        <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+      </div>
+
+      <!-- Guess card -->
+      <div class="guess-card" id="guess-card">
+        <div class="guess-view" id="guess-view">
+          <div class="guess-title">What is this place rated on Zomato?</div>
+          <div class="guess-value">
+            <span id="guess-num">3.7</span>
+            <span class="guess-stars" id="guess-stars"></span>
+          </div>
+          <input type="range" id="guess-range" min="1" max="5" step="0.1" value="3.7" aria-label="Your rating guess" />
+          <div class="range-scale"><span>1.0</span><span>2.0</span><span>3.0</span><span>4.0</span><span>5.0</span></div>
+          <button class="primary-btn" id="submit-btn" type="button">Lock in guess</button>
+          <div class="hint">Tip: ← → adjust by 0.1, Enter to lock in</div>
+        </div>
+
+        <div class="reveal-view" id="reveal-view" hidden>
+          <div class="verdict" id="verdict"></div>
+          <div class="reveal-actual">Actual rating <b id="rv-true"></b></div>
+          <div class="reveal-scale" id="reveal-scale"></div>
+          <div class="reveal-grid" id="reveal-grid"></div>
+          <button class="primary-btn" id="next-btn" type="button">Next restaurant →</button>
+        </div>
+      </div>
+
+      <div class="history" id="history" aria-label="Round history"></div>
+    </section>
+  </main>
+
+  <!-- How it works -->
+  <dialog id="how">
+    <h2>How it works</h2>
+    <p>Each card is a real restaurant listing from the Zomato Bangalore dataset. You see what a diner would see: votes, price, cuisine, popular dishes and customer reviews. The overall rating is hidden.</p>
+    <p>You play against three models: <b>TabPFN</b>, <b>XGBoost</b> and <b>Linear Regression</b>. Each made its predictions before you arrived. They were fitted on the same <b id="how-ntrain">37,384</b> other listings and never saw any of the restaurants in this game. The setup follows the Prior Labs cookbook <a href="https://docs.priorlabs.ai/cookbook/zomato_model_comparison" target="_blank" rel="noopener">Predict Restaurant Ratings with TabPFN 3.5</a>.</p>
+    <p>This is a regression task, so everyone is scored on error, where lower is better. <b>MAE</b> is the average distance from the real rating. <b>RMSE</b> is the root mean squared error, which punishes big misses more. Each round you beat every model whose prediction is further from the real rating than your guess.</p>
+    <ul class="fine" id="how-models"></ul>
+    <p class="fine">The map is decorative. Streets and neighbours are generated, not real locations.</p>
+    <form method="dialog"><button class="primary-btn" type="submit" autofocus>Let's play</button></form>
+  </dialog>
+
+  <script src="data/samples.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

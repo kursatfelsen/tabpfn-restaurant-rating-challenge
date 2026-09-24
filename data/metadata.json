@@ -1,0 +1,9 @@
+{
+  "dataset_id": "REG_TEXT_FOOD_ZOMATO_RESTAURANTS",
+  "slug": "multabench-zomato-restaurants",
+  "target": "rate",
+  "image_col": null,
+  "task_type": "reg",
+  "num_rows": 41665,
+  "num_features": 15
+}

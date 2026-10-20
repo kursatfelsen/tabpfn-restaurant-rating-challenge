@@ -3,6 +3,6 @@
 // call the two functions in supabase/schema.sql. Leave both empty to run the
 // game without a leaderboard.
 window.LEADERBOARD = {
-  url: "",     // e.g. "https://abcd1234.supabase.co"
-  anonKey: "", // the "anon public" key, or a "sb_publishable_..." key
+  url: "https://refdymkuoorwguiajspl.supabase.co",
+  anonKey: "sb_publishable_T0_87p-ptb5YrzIzEF2m2w_mkHaI9Ya", // the "anon public" key, or a "sb_publishable_..." key
 };

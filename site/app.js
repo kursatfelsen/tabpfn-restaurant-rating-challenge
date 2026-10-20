@@ -10,7 +10,7 @@
   }
   const SAMPLES = DATA.samples;
   const BY_ID = new Map(SAMPLES.map((s) => [s.id, s]));
-  const CHALLENGE_LEN = 30; // rounds in the daily challenge
+  const CHALLENGE_LEN = 15; // rounds in the daily challenge
   const ENDLESS_MIN = 30;   // free-play rounds needed before posting a score
   // Free play keeps the original key so existing progress survives.
   const STORE_KEYS = {
@@ -87,7 +87,7 @@
       const s = JSON.parse(store.get(STORE_KEYS[m]));
       if (!s || !Array.isArray(s.order) || !s.order.every((id) => BY_ID.has(id))) return null;
       // A challenge run from an earlier day is over. Start today's set.
-      if (m === "challenge" && s.day !== today()) return null;
+      if (m === "challenge" && (s.day !== today() || s.order.length !== CHALLENGE_LEN)) return null;
       return s;
     } catch (_) { /* corrupt or missing */ }
     return null;
@@ -95,6 +95,8 @@
   function save() { store.set(STORE_KEYS[mode], JSON.stringify(state)); }
   const current = () => BY_ID.get(state.order[state.idx % state.order.length]);
   const challengeDone = () => mode === "challenge" && state.results.length >= CHALLENGE_LEN;
+
+  const f2 = (v) => (Math.abs(v) < 0.005 ? 0 : v).toFixed(2); // never show "-0.00"
 
   function stats(R) {
     const n = R.length;
@@ -519,7 +521,7 @@
 
   function next() {
     if (!state.revealed) return;
-    if (challengeDone()) { openBoard("challenge"); return; }
+    if (challengeDone()) { openResults("challenge"); return; }
     state.idx += 1;
     if (state.idx >= state.order.length) { state.order = shuffle(state.order); state.idx = 0; }
     state.revealed = false;
@@ -549,11 +551,11 @@
 
     $("rv-you").textContent = res.guess.toFixed(1);
     $("rv-true").textContent = res.rate.toFixed(1);
-    $("rv-bot").textContent = res.bot.toFixed(2);
+    $("rv-bot").textContent = f2(res.bot);
     // Closer prediction is highlighted; ties get no highlight.
     const yu = $("rv-you-err"), bo = $("rv-bot-err");
-    yu.textContent = `off by ${eu.toFixed(2)}`; yu.className = "rv-err" + (d < -1e-9 ? " hit" : d > 1e-9 ? " miss" : "");
-    bo.textContent = `off by ${eb.toFixed(2)}`; bo.className = "rv-err" + (d > 1e-9 ? " hit" : d < -1e-9 ? " miss" : "");
+    yu.textContent = `off by ${f2(eu)}`; yu.className = "rv-err" + (d < -1e-9 ? " hit" : d > 1e-9 ? " miss" : "");
+    bo.textContent = `off by ${f2(eb)}`; bo.className = "rv-err" + (d > 1e-9 ? " hit" : d < -1e-9 ? " miss" : "");
 
     // Number line with the three markers.
     const sc = $("reveal-scale");
@@ -648,7 +650,7 @@
   const m = DATA.metrics;
   $("how-model").textContent =
     `Model: ${DATA.model}. On all ${m.nTest.toLocaleString("en-US")} held-out test listings it scored ` +
-    `R² ${m.r2.toFixed(3)}, RMSE ${m.rmse.toFixed(3)}, and MAE ${m.mae.toFixed(3)}.`;
+    `R² ${f2(m.r2)}, RMSE ${f2(m.rmse)}, and MAE ${f2(m.mae)}.`;
 
   // -------------------------------------------------------------- game mode
   function setMode(next) {
@@ -735,7 +737,7 @@
     loadRows();
   }
 
-  // The "your run" card: progress, or a form to post the score.
+  // The "your run" card on the leaderboard: progress, or a link to the result.
   function renderYou() {
     const tab = boardTab, isCh = tab === "challenge";
     const run = runFor(tab);
@@ -749,38 +751,45 @@
       box.append(el("div", { class: "you-title" }, isCh ? `Today's run: ${st.n} of ${CHALLENGE_LEN}` : `Free play: ${st.n} rounds`));
       box.append(el("div", { class: "you-line" },
         isCh ? `Finish the remaining ${left} to post your score.` : `Play ${left} more round${left === 1 ? "" : "s"} to post a score.`));
-      const go = el("button", { class: "primary-btn small", type: "button" }, tab === mode ? "Keep playing" : isCh ? "Play the Daily 30" : "Play free play");
+      const go = el("button", { class: "primary-btn small", type: "button" }, tab === mode ? "Keep playing" : isCh ? `Play the Daily ${CHALLENGE_LEN}` : "Play free play");
       go.addEventListener("click", () => { board.close(); setMode(tab); });
       box.append(go);
       return;
     }
 
-    const won = st.mae < st.botMae - 1e-9;
-    box.append(el("div", { class: "you-title" }, isCh ? (won ? "You beat TabPFN today! 🎉" : "Daily 30 complete 🏁") : "Your free-play run"));
-    const line = el("div", { class: "you-stats" });
+    box.append(el("div", { class: "you-title" }, isCh ? `Your Daily ${CHALLENGE_LEN}` : "Your free-play run"));
+    box.append(statGrid(st));
+    if (isCh && run.submitted) box.append(el("div", { class: "you-line ok" }, `Posted as ${run.postedName || store.get(NAME_KEY) || "you"}.`));
+    const go = el("button", { class: "primary-btn small", type: "button" },
+      isCh && run.submitted ? "See result & share" : "See result, post & share");
+    go.addEventListener("click", () => { board.close(); openResults(tab); });
+    box.append(go);
+  }
+
+  function statGrid(st) {
+    const grid = el("div", { class: "you-stats" });
     [["You", st.mae, "you"], [MODEL_SHORT, st.botMae, "bot"], ["Rounds won", `${st.wins} / ${st.n}`, ""]].forEach(([k, v, c]) => {
       const cell = el("div", { class: "you-stat " + c });
-      cell.append(el("b", {}, typeof v === "number" ? v.toFixed(3) : v), el("span", {}, typeof v === "number" ? `${k} MAE` : k));
-      line.append(cell);
+      cell.append(el("b", {}, typeof v === "number" ? f2(v) : v), el("span", {}, typeof v === "number" ? `${k} MAE` : k));
+      grid.append(cell);
     });
-    box.append(line);
+    return grid;
+  }
 
-    if (isCh && run.submitted) {
-      box.append(el("div", { class: "you-line ok" }, `Posted as ${run.postedName || store.get(NAME_KEY) || "you"}. Come back tomorrow for a new set.`));
-      return;
-    }
-    if (!lbReady) return;
-
+  // Name field that posts the run to its board.
+  function postForm(tab, run, st, onPosted) {
+    const isCh = tab === "challenge";
+    const wrap = el("div", { class: "post" });
     const form = el("form", { class: "you-form" });
     const input = el("input", { type: "text", maxlength: "24", required: "", placeholder: "Your name", "aria-label": "Your name", autocomplete: "nickname" });
     input.value = store.get(NAME_KEY) || "";
-    const notBetter = !isCh && run.postedMae != null && st.mae >= run.postedMae - 1e-9;
-    const btn = el("button", { class: "primary-btn small", type: "submit" },
-      isCh ? "Post score" : run.postedMae != null ? "Update score" : "Post score");
+    const btn = el("button", { class: "primary-btn small", type: "submit" }, !isCh && run.postedMae != null ? "Update score" : "Post score");
     form.append(input, btn);
     const msg = el("div", { class: "you-line" });
-    if (notBetter) msg.textContent = `Your posted best is ${run.postedMae.toFixed(3)}. Only a lower MAE replaces it.`;
-    box.append(form, msg);
+    if (!isCh && run.postedMae != null && st.mae >= run.postedMae - 1e-9) {
+      msg.textContent = `Your posted best is ${f2(run.postedMae)}. Only a lower MAE replaces it.`;
+    }
+    wrap.append(form, msg);
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -796,19 +805,190 @@
         });
         if (isCh) { run.submitted = true; run.postedName = name; }
         else run.postedMae = Math.min(run.postedMae ?? Infinity, Number(res.best_mae));
+        run.postedRank = `#${res.rank_pos} of ${res.total}`;
         saveRun(tab, run);
-        if (isCh) renderYou();
-        msg.className = "you-line ok";
-        msg.textContent = `You're #${res.rank_pos} of ${res.total}.`;
-        if (isCh) $("lb-you").append(msg);
-        btn.disabled = false;
-        loadRows();
+        onPosted(run.postedRank);
       } catch (err) {
         btn.disabled = false;
         msg.className = "you-line err";
         msg.textContent = `Couldn't post your score: ${err.message}`;
       }
     });
+    return wrap;
+  }
+
+  // ---------------------------------------------------------------- results
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const CHART_MAX_ROUNDS = 30;
+
+  // Grouped columns of absolute error per round, you vs TabPFN, as an SVG string.
+  // Used both on the page and inside the share image.
+  function errorChartSVG(R, { w = 560, h = 220, font = "Roboto, Arial, sans-serif", fs = 11 } = {}) {
+    const pad = { l: fs * 3.4, r: 8, t: 10, b: fs * 2.4 };
+    const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
+    const errs = R.map((r) => [Math.abs(r.guess - r.rate), Math.abs(r.bot - r.rate)]);
+    const top = Math.max(0.5, Math.ceil(Math.max(...errs.flat()) * 4) / 4);
+    const y = (v) => pad.t + ih - (v / top) * ih;
+    const band = iw / R.length;
+    const bw = Math.min(24, (band - 6) / 2);
+    let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" font-family="${font}">`;
+    // Recessive grid and y labels.
+    const step = top <= 1 ? 0.25 : top <= 2 ? 0.5 : 1;
+    for (let v = 0; v <= top + 1e-9; v += step) {
+      s += `<line x1="${pad.l}" x2="${w - pad.r}" y1="${y(v)}" y2="${y(v)}" stroke="${v ? "#eceef0" : "#bdc1c6"}" stroke-width="1"/>`;
+      s += `<text x="${pad.l - 6}" y="${y(v) + 4}" font-size="${fs}" fill="#5f6368" text-anchor="end">${v.toFixed(2)}</text>`;
+    }
+    // Columns with a 4px rounded data end, square at the baseline.
+    const col = (x, v, fill) => {
+      const hgt = Math.max(v > 0 ? 2 : 0, (v / top) * ih), r = Math.min(4, hgt / 2, bw / 2), b = y(0);
+      return `<path d="M${x},${b} V${b - hgt + r} Q${x},${b - hgt} ${x + r},${b - hgt} H${x + bw - r} Q${x + bw},${b - hgt} ${x + bw},${b - hgt + r} V${b} Z" style="fill:${fill}"/>`;
+    };
+    const every = Math.ceil(R.length / 15);
+    R.forEach((r, i) => {
+      const cx = pad.l + band * i + band / 2;
+      const name = BY_ID.get(r.id)?.name ?? "";
+      s += `<g><title>${esc(`${i + 1}. ${name}: you ${r.guess.toFixed(1)} (off ${f2(errs[i][0])}), ${MODEL_SHORT} ${f2(r.bot)} (off ${f2(errs[i][1])}), actual ${r.rate.toFixed(1)}`)}</title>`;
+      s += `<rect x="${cx - band / 2}" y="${pad.t}" width="${band}" height="${ih}" fill="transparent"/>`;
+      s += col(cx - bw - 1, errs[i][0], "var(--you, #1a73e8)") + col(cx + 1, errs[i][1], "var(--bot, #e8710a)");
+      if (i % every === 0 || i === R.length - 1) s += `<text x="${cx}" y="${h - fs * 0.7}" font-size="${fs}" fill="#5f6368" text-anchor="middle">${i + 1}</text>`;
+      s += `</g>`;
+    });
+    return s + `</svg>`;
+  }
+
+  function chartBlock(R) {
+    const shown = R.slice(-CHART_MAX_ROUNDS);
+    const st = stats(shown);
+    const wrap = el("figure", { class: "chart" });
+    const cap = el("figcaption");
+    cap.append(el("span", { class: "chart-title" }, R.length > shown.length ? `Error per round, last ${shown.length}` : "Error per round"));
+    const legend = el("span", { class: "legend" });
+    [["you", `You · MAE ${f2(st.mae)}`], ["bot", `${MODEL_SHORT} · MAE ${f2(st.botMae)}`]].forEach(([c, t]) => {
+      const it = el("span", { class: "key " + c }); it.append(el("i"), document.createTextNode(t)); legend.append(it);
+    });
+    cap.append(legend);
+    const plot = el("div", { class: "chart-plot" });
+    // Draw at roughly the on-screen width so labels stay readable on phones.
+    const w = Math.round(Math.min(560, Math.max(300, window.innerWidth - 90)));
+    plot.innerHTML = errorChartSVG(shown, { w, h: w < 420 ? 200 : 220 }); // every interpolated string is escaped
+    plot.firstChild.removeAttribute("width"); plot.firstChild.removeAttribute("height");
+    plot.firstChild.setAttribute("role", "img");
+    plot.firstChild.setAttribute("aria-label", `Absolute error per round. Your MAE ${f2(st.mae)}, ${MODEL_SHORT} MAE ${f2(st.botMae)}.`);
+    wrap.append(cap, plot, el("div", { class: "chart-note" }, "Distance from the real Zomato rating. Shorter is better. Hover a round for details."));
+    return wrap;
+  }
+
+  const shareUrl = (tab) => location.origin + location.pathname.replace(/index\.html$/, "") + (tab === "challenge" ? "#challenge" : "");
+  function shareText(tab, run, st) {
+    const grid = run.results.slice(-CHALLENGE_LEN).map((r) => {
+      const d = Math.abs(r.guess - r.rate) - Math.abs(r.bot - r.rate);
+      return d < -1e-9 ? "🟦" : d > 1e-9 ? "🟧" : "⬜";
+    }).join("");
+    const head = tab === "challenge" ? `Beat TabPFN · Daily ${CHALLENGE_LEN} · ${run.day}` : `Beat TabPFN · Free play · ${st.n} rounds`;
+    const verdict = st.mae < st.botMae - 1e-9 ? "I beat TabPFN! 🎉" : `I won ${st.wins} of ${st.n} rounds.`;
+    return `${head}\nMy MAE: ${f2(st.mae)} · ${MODEL_SHORT}: ${f2(st.botMae)}\n${verdict}\n${grid}\nCan you beat it? ${shareUrl(tab)}`;
+  }
+
+  // 1200x630 PNG of the result, for posts and chats.
+  async function shareImage(tab, run, st) {
+    const shown = run.results.slice(-CHART_MAX_ROUNDS);
+    const font = "Roboto, Helvetica, Arial, sans-serif";
+    const title = tab === "challenge" ? `Daily ${CHALLENGE_LEN} · ${run.day}` : `Free play · ${st.n} rounds`;
+    const chart = errorChartSVG(shown, { w: 1100, h: 285, font, fs: 17 })
+      .replace("<svg ", `<svg x="50" y="292" `).replace(/var\(--you, (#\w+)\)/g, "$1").replace(/var\(--bot, (#\w+)\)/g, "$1");
+    const stat = (x, label, value, color) =>
+      `<rect x="${x}" y="120" width="330" height="120" rx="18" fill="#f8f9fa"/>` +
+      `<text x="${x + 24}" y="196" font-size="56" font-weight="700" fill="${color}">${esc(value)}</text>` +
+      `<text x="${x + 24}" y="224" font-size="20" fill="#5f6368">${esc(label)}</text>`;
+    const svgStr = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" font-family="${font}">
+      <rect width="1200" height="630" fill="#ffffff"/>
+      <rect width="1200" height="8" fill="#1a73e8"/><rect x="600" width="600" height="8" fill="#e8710a"/>
+      <text x="50" y="72" font-size="40" font-weight="700" fill="#202124">Beat TabPFN</text>
+      <text x="1150" y="72" font-size="24" fill="#5f6368" text-anchor="end">${esc(title)}</text>
+      ${stat(50, "Your MAE", f2(st.mae), "#1a73e8")}
+      ${stat(435, `${MODEL_SHORT} MAE`, f2(st.botMae), "#b85a00")}
+      ${stat(820, "Rounds won", `${st.wins} / ${st.n}`, "#202124")}
+      <rect x="50" y="262" width="14" height="14" rx="3" fill="#1a73e8"/><text x="72" y="275" font-size="16" fill="#5f6368">You</text>
+      <rect x="120" y="262" width="14" height="14" rx="3" fill="#e8710a"/><text x="142" y="275" font-size="16" fill="#5f6368">${esc(MODEL_SHORT)}</text>
+      <text x="1150" y="275" font-size="16" fill="#5f6368" text-anchor="end">Error per round, shorter is better</text>
+      ${chart}
+      <text x="50" y="606" font-size="22" fill="#1a73e8">${esc(shareUrl(tab).replace(/^https?:\/\//, ""))}</text>
+    </svg>`;
+    const img = new Image();
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgStr);
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = 1200; c.height = 630;
+    c.getContext("2d").drawImage(img, 0, 0);
+    return new Promise((res) => c.toBlob(res, "image/png"));
+  }
+
+  function shareRow(tab, run, st) {
+    const row = el("div", { class: "share" });
+    const text = shareText(tab, run, st);
+    const url = shareUrl(tab);
+    const status = el("div", { class: "you-line" });
+    const button = (label, cls, fn) => {
+      const b = el("button", { class: "share-btn " + cls, type: "button" }, label);
+      b.addEventListener("click", fn);
+      row.append(b);
+      return b;
+    };
+    const fileName = `beat-tabpfn-${tab === "challenge" ? run.day : "free-play"}.png`;
+    if (navigator.share) button("Share…", "native", async () => {
+      try {
+        const blob = await shareImage(tab, run, st);
+        const file = new File([blob], fileName, { type: "image/png" });
+        const data = navigator.canShare?.({ files: [file] }) ? { files: [file], text } : { text, url };
+        await navigator.share(data);
+      } catch (_) { /* cancelled */ }
+    });
+    const copy = button("Copy result", "", async () => {
+      try { await navigator.clipboard.writeText(text); copy.textContent = "Copied ✓"; }
+      catch (_) { status.textContent = text; }
+      setTimeout(() => (copy.textContent = "Copy result"), 2000);
+    });
+    button("Download image", "", async () => {
+      const blob = await shareImage(tab, run, st);
+      const a = el("a", { href: URL.createObjectURL(blob), download: fileName });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+    const open = (u) => window.open(u, "_blank", "noopener");
+    button("LinkedIn", "li", () => open(`https://www.linkedin.com/feed/?shareActive=true&text=${encodeURIComponent(text)}`));
+    button("X", "x", () => open(`https://x.com/intent/post?text=${encodeURIComponent(text)}`));
+    button("WhatsApp", "wa", () => open(`https://wa.me/?text=${encodeURIComponent(text)}`));
+    const box = el("div", { class: "share-box" });
+    box.append(el("div", { class: "share-title" }, "Share your result"), row, status);
+    return box;
+  }
+
+  const results = $("results");
+  function openResults(tab = mode) {
+    const isCh = tab === "challenge";
+    const run = runFor(tab);
+    const st = stats(run.results);
+    const body = $("res-body");
+    body.replaceChildren();
+    $("res-title").textContent = st.mae < st.botMae - 1e-9 ? "You beat TabPFN! 🎉"
+      : isCh ? `Daily ${CHALLENGE_LEN} complete 🏁` : "Your free-play run";
+    $("res-sub").textContent = isCh
+      ? `${run.day} · the same ${CHALLENGE_LEN} restaurants for everyone today`
+      : `${st.n} rounds of free play`;
+    body.append(statGrid(st), chartBlock(run.results));
+
+    const posted = el("div", { class: "you-line ok" });
+    const showPosted = (rank) => { posted.textContent = `Posted as ${run.postedName || store.get(NAME_KEY)}${rank ? ` · you're ${rank}` : ""}.`; };
+    if (isCh && run.submitted) { showPosted(run.postedRank); body.append(posted); }
+    else if (lbReady && st.n >= (isCh ? CHALLENGE_LEN : ENDLESS_MIN)) {
+      const form = postForm(tab, run, st, (rank) => { form.replaceWith(posted); if (!isCh) run.postedName = store.get(NAME_KEY); showPosted(rank); });
+      body.append(form);
+    }
+    body.append(shareRow(tab, run, st));
+    $("res-board").onclick = () => { results.close(); openBoard(tab); };
+    $("res-free").hidden = !isCh;
+    $("res-free").onclick = () => { results.close(); setMode("endless"); };
+    if (!results.open) results.showModal();
   }
 
   async function loadRows() {
@@ -845,7 +1025,7 @@
     let botShown = false;
     const botRow = () => {
       const tr = el("tr", { class: "bot-row" });
-      tr.append(el("td", {}, "🤖"), el("td", {}, `${MODEL_SHORT} (line to beat)`), el("td", {}, line.toFixed(3)),
+      tr.append(el("td", {}, "🤖"), el("td", {}, `${MODEL_SHORT} (line to beat)`), el("td", {}, f2(line)),
         el("td", {}, tab === "challenge" ? "—" : DATA.metrics.nTest.toLocaleString("en-US")));
       tb.append(tr);
       botShown = true;
@@ -861,7 +1041,7 @@
       tr.append(
         el("td", { class: "rank" }, medal[r.rank_pos - 1] || String(r.rank_pos)),
         el("td", { class: "who" }, r.name + (r.is_me ? " (you)" : "")),
-        el("td", { class: "num" }, mae.toFixed(3)),
+        el("td", { class: "num" }, f2(mae)),
         el("td", { class: "num" }, tab === "challenge" ? `${r.wins}/${r.rounds}` : String(r.rounds)),
       );
       tb.append(tr);

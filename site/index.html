@@ -45,7 +45,7 @@
     <div class="top-actions">
       <div class="seg mode-switch" role="group" aria-label="Game mode">
         <button type="button" data-mode="endless">Free play</button>
-        <button type="button" data-mode="challenge">Daily 30</button>
+        <button type="button" data-mode="challenge">Daily 15</button>
       </div>
       <button class="ghost trophy" id="lb-btn" type="button"><span aria-hidden="true">🏆</span><span class="lbl">Leaderboard</span></button>
       <button class="ghost round-btn" id="how-btn" type="button" aria-label="How it works" title="How it works">?</button>
@@ -160,10 +160,26 @@
     <p>Each card is a real restaurant listing from the Zomato Bangalore dataset. You see what a diner would see: votes, price, cuisine, popular dishes and customer reviews. The overall rating is hidden.</p>
     <p>TabPFN made its prediction before you arrived. It was fitted on <b id="how-ntrain">37,498</b> other listings and never saw any of the restaurants in this game. The setup follows the Prior Labs cookbook <a href="https://docs.priorlabs.ai/cookbook/zomato_model_comparison" target="_blank" rel="noopener">Predict Restaurant Ratings with TabPFN 3.5</a>.</p>
     <p>This is a regression task, so both players are scored on error, where lower is better. <b>MAE</b> is the average distance from the real rating. <b>RMSE</b> is the root mean squared error, which punishes big misses more. The player closer to the real rating wins the round.</p>
-    <p><b>Free play</b> is endless. <b>Daily 30</b> gives everyone the same 30 restaurants each day, with one attempt. Both have a leaderboard ranked by MAE.</p>
+    <p><b>Free play</b> is endless. <b>Daily 15</b> gives everyone the same 15 restaurants each day, with one attempt. Both have a leaderboard ranked by MAE, and you can share your result at the end.</p>
     <p class="fine" id="how-model"></p>
     <p class="fine">The map is decorative. Streets and neighbours are generated, not real locations.</p>
     <form method="dialog"><button class="primary-btn" type="submit" autofocus>Let's play</button></form>
+  </dialog>
+
+  <!-- Result of a run: score, error chart, post and share -->
+  <dialog id="results" class="lb results" aria-labelledby="res-title">
+    <div class="lb-head">
+      <div>
+        <h2 id="res-title"></h2>
+        <p class="lb-sub tight" id="res-sub"></p>
+      </div>
+      <form method="dialog"><button class="icon-btn" type="submit" aria-label="Close">×</button></form>
+    </div>
+    <div class="res-body" id="res-body"></div>
+    <div class="res-actions">
+      <button class="ghost" id="res-board" type="button">🏆 View leaderboard</button>
+      <button class="ghost" id="res-free" type="button">Keep playing in free play</button>
+    </div>
   </dialog>
 
   <!-- Leaderboard -->
@@ -173,7 +189,7 @@
       <form method="dialog"><button class="icon-btn" type="submit" aria-label="Close">×</button></form>
     </div>
     <div class="seg lb-tabs" role="group" aria-label="Leaderboard">
-      <button type="button" data-board="challenge">Daily 30</button>
+      <button type="button" data-board="challenge">Daily 15</button>
       <button type="button" data-board="endless">Free play</button>
     </div>
     <p class="lb-sub" id="lb-sub"></p>

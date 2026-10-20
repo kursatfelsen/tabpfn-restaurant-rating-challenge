@@ -229,7 +229,7 @@ def card(row: pd.Series, pred: float) -> dict:
         "hist": hist,
         "reviews": shown,
         "rate": float(row["rate"]),
-        "tabpfn": round(float(pred), 3),
+        "tabpfn": round(float(pred), 2),  # shown to 2 decimals, so score on the same value
     }
 
 

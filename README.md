@@ -35,6 +35,14 @@ python3 -m http.server 8000 --directory site
 The site is fully static. Predictions live in `site/data/samples.js`, so it can
 be hosted on any static host, such as GitHub Pages, Netlify or S3.
 
+## Deploy to GitHub Pages
+
+`.github/workflows/pages.yml` publishes the `site/` folder on every push to
+`main` that touches `site/`. One-time setup: in the repo, open
+**Settings → Pages** and set **Source** to **GitHub Actions**. The game is then
+served at `https://<owner>.github.io/<repo>/`. All asset paths are relative, so
+it also works under a custom domain.
+
 ## Regenerate predictions
 
 ```bash

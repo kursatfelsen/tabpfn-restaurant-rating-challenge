@@ -1,19 +1,16 @@
-/* Beat TabPFN: guess Zomato ratings, compare against precomputed model predictions. */
+/* Beat TabPFN: guess Zomato ratings, compare against precomputed TabPFN predictions. */
 (() => {
   "use strict";
 
   const DATA = window.GAME_DATA;
-  if (!DATA || !DATA.samples || !DATA.samples.length || !DATA.models) {
+  if (!DATA || !DATA.samples || !DATA.samples.length) {
     document.body.innerHTML =
       '<p style="padding:40px;font:16px sans-serif">No game data found. Run <code>python precompute.py</code> first.</p>';
     return;
   }
   const SAMPLES = DATA.samples;
   const BY_ID = new Map(SAMPLES.map((s) => [s.id, s]));
-  // Opponents, strongest first. Short names drop the "(local)" / "(API)" suffix.
-  const MODELS = DATA.models.map((m) => ({ ...m, short: m.name.replace(/\s*\(.*\)/, "") }));
-  const STORE_KEY = "beat-tabpfn-v2:" + MODELS.map((m) => m.name).join("|") + ":" + SAMPLES.length;
-  const EPS = 1e-9;
+  const STORE_KEY = "beat-tabpfn-v1:" + DATA.model + ":" + SAMPLES.length;
 
   const $ = (id) => document.getElementById(id);
   const el = (tag, attrs = {}, text) => {
@@ -450,7 +447,7 @@
   function submit() {
     if (state.revealed) return;
     const s = current();
-    state.results.push({ id: s.id, guess: state.guess, rate: s.rate, preds: { ...s.preds } });
+    state.results.push({ id: s.id, guess: state.guess, bot: s.tabpfn, rate: s.rate });
     state.revealed = true;
     save();
     showReveal();
@@ -467,22 +464,10 @@
     window.scrollTo(0, 0);
   }
 
-  // Per-model outcome of one round from the player's side: "w", "l" or "t".
-  function outcomes(r) {
-    const eu = Math.abs(r.guess - r.rate);
-    return MODELS.map((m) => {
-      const d = eu - Math.abs(r.preds[m.key] - r.rate);
-      return Math.abs(d) < EPS ? "t" : d < 0 ? "w" : "l";
-    });
-  }
-  const listNames = (names) =>
-    names.length <= 1 ? names.join("") : names.slice(0, -1).join(", ") + " and " + names[names.length - 1];
-
   function showReveal() {
     const s = current();
     const res = state.results[state.results.length - 1];
-    const eu = Math.abs(res.guess - res.rate);
-    const out = outcomes(res);
+    const eu = Math.abs(res.guess - res.rate), eb = Math.abs(res.bot - res.rate);
 
     $("guess-view").hidden = true;
     $("reveal-view").hidden = false;
@@ -493,84 +478,56 @@
     $("p-stars").replaceWith(Object.assign(starsEl(s.rate), { id: "p-stars" }));
 
     const v = $("verdict");
-    const beaten = MODELS.filter((_, i) => out[i] === "w").map((m) => m.short);
-    if (beaten.length === MODELS.length) { v.textContent = "You beat every model! 🎉"; v.className = "verdict win"; }
-    else if (beaten.length) { v.textContent = `You beat ${listNames(beaten)}`; v.className = "verdict part"; }
-    else if (out.every((o) => o === "t")) { v.textContent = "Dead heat with every model"; v.className = "verdict tie"; }
-    else { v.textContent = "The models win this one"; v.className = "verdict lose"; }
+    const d = eu - eb;
+    if (Math.abs(d) < 1e-9) { v.textContent = "It's a tie!"; v.className = "verdict tie"; }
+    else if (d < 0) { v.textContent = "You beat TabPFN! 🎉"; v.className = "verdict win"; }
+    else { v.textContent = "TabPFN wins this one"; v.className = "verdict lose"; }
+
+    $("rv-you").textContent = res.guess.toFixed(1);
     $("rv-true").textContent = res.rate.toFixed(1);
+    $("rv-bot").textContent = res.bot.toFixed(2);
+    // Closer prediction is highlighted; ties get no highlight.
+    const yu = $("rv-you-err"), bo = $("rv-bot-err");
+    yu.textContent = `off by ${eu.toFixed(2)}`; yu.className = "rv-err" + (d < -1e-9 ? " hit" : d > 1e-9 ? " miss" : "");
+    bo.textContent = `off by ${eb.toFixed(2)}`; bo.className = "rv-err" + (d > 1e-9 ? " hit" : d < -1e-9 ? " miss" : "");
 
-    // One cell for the player, one per model. A model cell is marked when you beat it.
-    const grid = $("reveal-grid");
-    grid.replaceChildren();
-    const cell = (label, value, err, color, cls = "") => {
-      const c = el("div", { class: "rv " + cls });
-      c.style.setProperty("--c", color);
-      c.append(el("div", { class: "rv-label" }, label), el("div", { class: "rv-num" }, value), el("div", { class: "rv-err" }, err));
-      grid.append(c);
-      return c;
-    };
-    cell("You", res.guess.toFixed(1), `off by ${eu.toFixed(2)}`, "var(--you)", "you");
-    MODELS.forEach((m, i) => {
-      const p = res.preds[m.key];
-      const c = cell(m.short, p.toFixed(2), `off by ${Math.abs(p - res.rate).toFixed(2)}`, `var(--m-${m.key})`, out[i]);
-      c.title = out[i] === "w" ? `You were closer than ${m.short}` : out[i] === "l" ? `${m.short} was closer` : "Tie";
-    });
-
-    // Number line with every marker.
+    // Number line with the three markers.
     const sc = $("reveal-scale");
     sc.replaceChildren(el("div", { class: "track" }));
     const pos = (x) => `${((x - 1) / 4) * 100}%`;
     for (let t = 1; t <= 5; t++) { const tk = el("span", { class: "tick" }, t.toFixed(1)); tk.style.left = pos(t); sc.append(tk); }
-    [["truth", res.rate, "Actual", "var(--star)"], ...MODELS.map((m) => ["model", res.preds[m.key], m.short, `var(--m-${m.key})`]),
-      ["you", res.guess, "You", "var(--you)"]].forEach(([cls, x, title, color]) => {
-      const mk = el("span", { class: "mark " + cls, title: `${title}: ${x.toFixed(2)}` });
-      mk.style.left = "50%";
-      mk.style.background = color;
-      sc.append(mk);
-      requestAnimationFrame(() => requestAnimationFrame(() => (mk.style.left = pos(x))));
+    [["truth", res.rate, "Actual"], ["you", res.guess, "You"], ["bot", res.bot, "TabPFN"]].forEach(([cls, x, title]) => {
+      const m = el("span", { class: "mark " + cls, title: `${title}: ${x.toFixed(2)}` });
+      m.style.left = "50%";
+      sc.append(m);
+      requestAnimationFrame(() => requestAnimationFrame(() => (m.style.left = pos(x))));
     });
     $("next-btn").focus();
-  }
-
-  function scoreCard(label, color, mae, sub) {
-    const c = el("div", { class: "score-card" });
-    c.style.setProperty("--c", color);
-    const main = el("div", { class: "score-main" });
-    main.append(el("span", {}, mae), el("small", {}, "MAE"));
-    c.append(el("div", { class: "score-label" }, label), main, el("div", { class: "score-sub" }, sub));
-    return c;
   }
 
   function renderScores() {
     const R = state.results;
     const n = R.length;
-    const err = (r, k) => (k === "guess" ? r.guess : r.preds[k]) - r.rate;
-    const mae = (k) => (n ? (R.reduce((a, r) => a + Math.abs(err(r, k)), 0) / n).toFixed(2) : "–");
-    const rmse = (k) => (n ? Math.sqrt(R.reduce((a, r) => a + err(r, k) ** 2, 0) / n).toFixed(2) : "–");
-
-    // Head-to-head record against each model, plus the history strip.
-    const wins = MODELS.map(() => 0), losses = MODELS.map(() => 0);
+    const mae = (k) => (n ? (R.reduce((a, r) => a + Math.abs(r[k] - r.rate), 0) / n).toFixed(2) : "–");
+    const rmse = (k) => (n ? Math.sqrt(R.reduce((a, r) => a + (r[k] - r.rate) ** 2, 0) / n).toFixed(2) : "–");
+    let wy = 0, wb = 0;
     const hist = $("history");
     hist.replaceChildren();
     R.forEach((r) => {
-      const out = outcomes(r);
-      out.forEach((o, i) => { if (o === "w") wins[i]++; else if (o === "l") losses[i]++; });
-      const beat = out.filter((o) => o === "w").length;
-      const tip = [`${BY_ID.get(r.id)?.name}: actual ${r.rate.toFixed(1)}, you ${r.guess.toFixed(1)}`,
-        ...MODELS.map((m) => `${m.short} ${r.preds[m.key].toFixed(2)}`)].join(", ");
-      hist.append(el("span", { class: "b" + beat, title: `${tip}. You beat ${beat} of ${MODELS.length}.` }));
+      const d = Math.abs(r.guess - r.rate) - Math.abs(r.bot - r.rate);
+      const c = Math.abs(d) < 1e-9 ? "t" : d < 0 ? "w" : "l";
+      if (c === "w") wy++; else if (c === "l") wb++;
+      hist.append(el("span", { class: c, title: `${BY_ID.get(r.id)?.name}: you ${r.guess.toFixed(1)}, TabPFN ${r.bot.toFixed(2)}, actual ${r.rate.toFixed(1)}` }));
     });
     // Keep the history strip short.
     while (hist.children.length > 40) hist.firstChild.remove();
-
-    const board = $("scoreboard");
-    board.replaceChildren(scoreCard(`You · round ${n + (state.revealed ? 0 : 1)}`, "var(--you)", mae("guess"), `RMSE ${rmse("guess")}`));
-    MODELS.forEach((m, i) => {
-      const c = scoreCard(m.short, `var(--m-${m.key})`, mae(m.key), `RMSE ${rmse(m.key)} · you ${wins[i]}–${losses[i]}`);
-      c.title = `Your record against ${m.short}: ${wins[i]} wins, ${losses[i]} losses`;
-      board.append(c);
-    });
+    $("you-mae").textContent = mae("guess");
+    $("bot-mae").textContent = mae("bot");
+    $("you-rmse").textContent = rmse("guess");
+    $("bot-rmse").textContent = rmse("bot");
+    $("you-wins").textContent = wy;
+    $("bot-wins").textContent = wb;
+    $("round-no").textContent = n + (state.revealed ? 0 : 1);
   }
 
   function showRound() {
@@ -614,12 +571,12 @@
 
   const how = $("how");
   $("how-btn").addEventListener("click", () => how.showModal());
-  $("how-ntrain").textContent = DATA.nTrain.toLocaleString("en-US");
-  $("how-models").replaceChildren(
-    el("li", { class: "how-head" }, `Scores on all ${DATA.nTest.toLocaleString("en-US")} held-out test listings:`),
-    ...MODELS.map(({ name, metrics: m }) =>
-      el("li", {}, `${name}: MAE ${m.mae.toFixed(3)}, RMSE ${m.rmse.toFixed(3)}, R² ${m.r2.toFixed(3)}`))
-  );
+  $("model-name").textContent = DATA.model.replace(/\s*\(.*\)/, "");
+  $("how-ntrain").textContent = DATA.metrics.nTrain.toLocaleString("en-US");
+  const m = DATA.metrics;
+  $("how-model").textContent =
+    `Model: ${DATA.model}. On all ${m.nTest.toLocaleString("en-US")} held-out test listings it scored ` +
+    `R² ${m.r2.toFixed(3)}, RMSE ${m.rmse.toFixed(3)}, and MAE ${m.mae.toFixed(3)}.`;
 
   showRound();
   if (!state.results.length) how.showModal();

@@ -20,8 +20,22 @@
       </div>
     </div>
 
-    <!-- Filled by app.js: one card for the player, one per model. -->
-    <div class="scoreboard" id="scoreboard" aria-live="polite"></div>
+    <div class="scoreboard" aria-live="polite">
+      <div class="score-card you">
+        <div class="score-label">You</div>
+        <div class="score-main"><span id="you-mae">–</span><small>MAE</small></div>
+        <div class="score-sub">RMSE <b id="you-rmse">–</b> · wins <b id="you-wins">0</b></div>
+      </div>
+      <div class="vs">
+        <div class="round">Round <b id="round-no">1</b></div>
+        <div class="vs-text">vs</div>
+      </div>
+      <div class="score-card bot">
+        <div class="score-label" id="model-name">TabPFN</div>
+        <div class="score-main"><span id="bot-mae">–</span><small>MAE</small></div>
+        <div class="score-sub">RMSE <b id="bot-rmse">–</b> · wins <b id="bot-wins">0</b></div>
+      </div>
+    </div>
 
     <div class="top-actions">
       <button class="ghost" id="how-btn" type="button">How it works</button>
@@ -115,9 +129,12 @@
 
         <div class="reveal-view" id="reveal-view" hidden>
           <div class="verdict" id="verdict"></div>
-          <div class="reveal-actual">Actual rating <b id="rv-true"></b></div>
           <div class="reveal-scale" id="reveal-scale"></div>
-          <div class="reveal-grid" id="reveal-grid"></div>
+          <div class="reveal-grid">
+            <div class="rv you"><div class="rv-label">You</div><div class="rv-num" id="rv-you"></div><div class="rv-err" id="rv-you-err"></div></div>
+            <div class="rv truth"><div class="rv-label">Actual</div><div class="rv-num" id="rv-true"></div><div class="rv-err">Zomato rating</div></div>
+            <div class="rv bot"><div class="rv-label">TabPFN</div><div class="rv-num" id="rv-bot"></div><div class="rv-err" id="rv-bot-err"></div></div>
+          </div>
           <button class="primary-btn" id="next-btn" type="button">Next restaurant →</button>
         </div>
       </div>
@@ -130,9 +147,9 @@
   <dialog id="how">
     <h2>How it works</h2>
     <p>Each card is a real restaurant listing from the Zomato Bangalore dataset. You see what a diner would see: votes, price, cuisine, popular dishes and customer reviews. The overall rating is hidden.</p>
-    <p>You play against three models: <b>TabPFN</b>, <b>XGBoost</b> and <b>Linear Regression</b>. Each made its predictions before you arrived. They were fitted on the same <b id="how-ntrain">37,384</b> other listings and never saw any of the restaurants in this game. The setup follows the Prior Labs cookbook <a href="https://docs.priorlabs.ai/cookbook/zomato_model_comparison" target="_blank" rel="noopener">Predict Restaurant Ratings with TabPFN 3.5</a>.</p>
-    <p>This is a regression task, so everyone is scored on error, where lower is better. <b>MAE</b> is the average distance from the real rating. <b>RMSE</b> is the root mean squared error, which punishes big misses more. Each round you beat every model whose prediction is further from the real rating than your guess.</p>
-    <ul class="fine" id="how-models"></ul>
+    <p>TabPFN made its prediction before you arrived. It was fitted on <b id="how-ntrain">37,498</b> other listings and never saw any of the restaurants in this game. The setup follows the Prior Labs cookbook <a href="https://docs.priorlabs.ai/cookbook/zomato_model_comparison" target="_blank" rel="noopener">Predict Restaurant Ratings with TabPFN 3.5</a>.</p>
+    <p>This is a regression task, so both players are scored on error, where lower is better. <b>MAE</b> is the average distance from the real rating. <b>RMSE</b> is the root mean squared error, which punishes big misses more. The player closer to the real rating wins the round.</p>
+    <p class="fine" id="how-model"></p>
     <p class="fine">The map is decorative. Streets and neighbours are generated, not real locations.</p>
     <form method="dialog"><button class="primary-btn" type="submit" autofocus>Let's play</button></form>
   </dialog>

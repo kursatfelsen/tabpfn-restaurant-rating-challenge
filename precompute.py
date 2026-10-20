@@ -3,12 +3,10 @@
 Follows the Prior Labs cookbook "Predict Restaurant Ratings with TabPFN 3.5":
 https://docs.priorlabs.ai/cookbook/zomato_model_comparison
 
-Same data (MulTaBench curated Zomato Bangalore listings) and the cookbook's
-10% hold-out with SEED=42, with one change: the split is grouped by restaurant
-(name + address). The raw data lists most restaurants several times with the
-same rating, and the cookbook's row split puts ~95% of test restaurants into
-train as well. The game only ever shows test listings, so no model saw any
-listing of a restaurant the player is shown.
+Same data (MulTaBench curated Zomato Bangalore listings), same 80/10/10 split
+with SEED=42, TabPFN fitted on train+validation (37,498 rows) and evaluated on
+the 4,167 held-out test listings. The game only ever shows test listings, so
+TabPFN never saw any restaurant card the player is shown.
 
 Backends
 --------
@@ -17,13 +15,6 @@ api   (default, matches the cookbook): tabpfn-client TabPFN 3.5 regressor,
 local : open-source `tabpfn` package with the locally cached TabPFN v3
       checkpoint. Local TabPFN does not embed free text, so the long text
       columns are replaced by parsed numeric review statistics.
-
-Baselines (always fitted, cached in data/preds_baselines.json)
----------
-XGBoost           : the cookbook's default XGBoost on TF-IDF text + one-hot
-                    categoricals + median-imputed numerics.
-Linear Regression : the same features into ridge-regularised least squares,
-                    alpha picked on the cookbook's validation split.
 
 Usage
 -----
@@ -45,6 +36,7 @@ from zipfile import ZipFile
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, r2_score, root_mean_squared_error
+from sklearn.model_selection import train_test_split
 
 SEED = 42
 ROOT = Path(__file__).parent
@@ -75,26 +67,9 @@ def load_data() -> pd.DataFrame:
     return df
 
 
-def restaurant_groups(df: pd.DataFrame) -> pd.Series:
-    """One group per physical restaurant. The raw data lists the same place
-    several times (once per "listed_in" type and city), almost always with the
-    same rating, so a plain row split leaks ~95% of test restaurants into train."""
-    norm = lambda s: s.fillna("").str.lower().str.replace(r"\s+", " ", regex=True).str.strip()
-    return norm(df["name"]) + "|" + norm(df["address"])
-
-
-def group_split(df: pd.DataFrame, test_size: float):
-    from sklearn.model_selection import GroupShuffleSplit
-
-    gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=SEED)
-    a, b = next(gss.split(df, groups=restaurant_groups(df)))
-    return df.iloc[a], df.iloc[b]
-
-
 def split(df: pd.DataFrame):
-    # Cookbook proportions (10% held out, seed 42), but grouped by restaurant
-    # so no test restaurant has any listing in train.
-    return group_split(df, test_size=0.1)
+    train_valid, test = train_test_split(df, test_size=0.1, random_state=SEED)
+    return train_valid, test
 
 
 def parse_reviews(raw) -> list[tuple[float | None, str]]:
@@ -224,80 +199,8 @@ def predict_local(train_valid: pd.DataFrame, test: pd.DataFrame) -> tuple[np.nda
     return np.concatenate(preds), "TabPFN v3 (local)"
 
 
-# --------------------------------------------------------------------- baselines
-TEXT_COLS = ["reviews_list", "menu_item", "dish_liked"]
-
-
-def baseline_preprocessor(X: pd.DataFrame, scale_numeric: bool):
-    """Cookbook XGBoost preprocessing: TF-IDF on the joined text columns,
-    one-hot categoricals, median-imputed numerics."""
-    from sklearn.compose import ColumnTransformer
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.impute import SimpleImputer
-    from sklearn.pipeline import make_pipeline
-    from sklearn.preprocessing import OneHotEncoder, StandardScaler
-
-    cat_cols = [c for c in X.select_dtypes(exclude="number").columns if c != "text"]
-    num_cols = X.select_dtypes(include="number").columns.tolist()
-    numeric = SimpleImputer(strategy="median")
-    if scale_numeric:
-        numeric = make_pipeline(numeric, StandardScaler())
-    return ColumnTransformer([
-        ("text", TfidfVectorizer(max_features=20_000, ngram_range=(1, 2), min_df=3, sublinear_tf=True), "text"),
-        ("categorical", OneHotEncoder(handle_unknown="ignore"), cat_cols),
-        ("numeric", numeric, num_cols),
-    ])
-
-
-def baseline_frame(frame: pd.DataFrame) -> pd.DataFrame:
-    X = frame.drop(columns=["rate", *TEXT_COLS])
-    cat_cols = X.select_dtypes(exclude="number").columns
-    X[cat_cols] = X[cat_cols].fillna("NA")
-    return X.assign(text=frame[TEXT_COLS].fillna("").agg(" ".join, axis=1))
-
-
-def predict_baselines(train_valid: pd.DataFrame, test: pd.DataFrame) -> dict[str, np.ndarray]:
-    import xgboost as xgb
-    from sklearn.linear_model import Ridge
-    from sklearn.pipeline import make_pipeline
-
-    X_tv, X_te = baseline_frame(train_valid), baseline_frame(test)
-    y_tv = train_valid["rate"].to_numpy()
-    lo, hi = y_tv.min(), y_tv.max()
-
-    # Linear regression with a small ridge penalty. Plain least squares is
-    # ill-posed on ~20k sparse TF-IDF + one-hot columns. Alpha is picked on
-    # a validation split (1/9 of train+valid = 10% of all data), also grouped
-    # by restaurant.
-    tr, va = group_split(train_valid, test_size=1 / 9)
-    best = None
-    for alpha in (0.3, 1.0, 3.0, 10.0):
-        m = make_pipeline(baseline_preprocessor(X_tv, True), Ridge(alpha=alpha))
-        m.fit(baseline_frame(tr), tr["rate"].to_numpy())
-        rmse = root_mean_squared_error(va["rate"], np.clip(m.predict(baseline_frame(va)), lo, hi))
-        print(f"  ridge alpha={alpha}: valid RMSE {rmse:.4f}", flush=True)
-        if best is None or rmse < best[0]:
-            best = (rmse, alpha)
-    linreg = make_pipeline(baseline_preprocessor(X_tv, True), Ridge(alpha=best[1]))
-    linreg.fit(X_tv, y_tv)
-
-    # Cookbook default XGBoost.
-    pre = baseline_preprocessor(X_tv, False)
-    Xt_tv = pre.fit_transform(X_tv)
-    model = xgb.XGBRegressor(
-        objective="reg:squarederror", eval_metric="rmse", tree_method="hist",
-        device="cpu", n_jobs=8, random_state=SEED,
-    )
-    model.fit(Xt_tv, y_tv, verbose=False)
-
-    return {
-        "linreg": np.clip(linreg.predict(X_te), lo, hi),
-        "xgb": np.clip(model.predict(pre.transform(X_te)), lo, hi),
-    }
-
-
 # ------------------------------------------------------------------------ export
-def card(row: pd.Series, preds: dict[str, float]) -> dict:
+def card(row: pd.Series, pred: float) -> dict:
     reviews = parse_reviews(row["reviews_list"])
     shown = [
         {"stars": s, "text": t[:420] + ("…" if len(t) > 420 else "")}
@@ -329,15 +232,7 @@ def card(row: pd.Series, preds: dict[str, float]) -> dict:
         "hist": hist,
         "reviews": shown,
         "rate": float(row["rate"]),
-        "preds": {k: round(float(v), 3) for k, v in preds.items()},
-    }
-
-
-def metrics_for(y: np.ndarray, preds: np.ndarray) -> dict:
-    return {
-        "r2": float(r2_score(y, preds)),
-        "rmse": float(root_mean_squared_error(y, preds)),
-        "mae": float(mean_absolute_error(y, preds)),
+        "tabpfn": round(float(pred), 3),
     }
 
 
@@ -354,57 +249,32 @@ def main() -> None:
     train_valid, test = split(df)
     print(f"train+valid: {len(train_valid):,}  test: {len(test):,}")
 
-    # Caches record which test rows they cover, so a cache from another split is refused.
-    test_index = [int(i) for i in test.index]
-
-    def cached(path: Path):
-        if not (args.reuse and path.exists()):
-            return None
-        c = json.loads(path.read_text())
-        if c.get("index") != test_index:
-            print(f"  ignoring {path.name}: made for a different split")
-            return None
-        return c
-
     t0 = time.time()
     cache = DATA_DIR / f"preds_{args.backend}.json"
-    if c := cached(cache):
-        preds, model_name = np.array(c["preds"]), c["model"]
+    if args.reuse and cache.exists():
+        cached = json.loads(cache.read_text())
+        preds, model_name = np.array(cached["preds"]), cached["model"]
+        assert len(preds) == len(test)
     else:
         preds, model_name = (predict_api if args.backend == "api" else predict_local)(train_valid, test)
-        cache.write_text(json.dumps({"model": model_name, "index": test_index, "preds": [float(p) for p in preds]}))
+        cache.write_text(json.dumps({"model": model_name, "preds": [float(p) for p in preds]}))
     y = test["rate"].to_numpy()
-    print(f"{model_name}: {metrics_for(y, preds)}  ({time.time() - t0:.0f}s)")
-
-    t0 = time.time()
-    base_cache = DATA_DIR / "preds_baselines.json"
-    if c := cached(base_cache):
-        base = {k: np.array(v) for k, v in c["preds"].items()}
-    else:
-        base = predict_baselines(train_valid, test)
-        base_cache.write_text(json.dumps({"index": test_index, "preds": {k: [float(p) for p in v] for k, v in base.items()}}))
-
-    all_preds = {"tabpfn": preds, **base}
-    names = {"tabpfn": model_name, "xgb": "XGBoost", "linreg": "Linear Regression"}
-    models = []
-    for key in ("tabpfn", "xgb", "linreg"):
-        m = metrics_for(y, all_preds[key])
-        print(f"{names[key]}: {m}")
-        models.append({"key": key, "name": names[key], "metrics": m})
-    print(f"baselines ({time.time() - t0:.0f}s)")
-
-    # Random subset of the held-out test listings; the site shuffles it again.
-    sample = test.sample(n=min(args.n_samples, len(test)), random_state=SEED)
-    at = {idx: i for i, idx in enumerate(test_index)}
-    cards = [card(r, {k: v[at[r.name]] for k, v in all_preds.items()}) for _, r in sample.iterrows()]
-
-    OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "models": models,
+    metrics = {
+        "r2": float(r2_score(y, preds)),
+        "rmse": float(root_mean_squared_error(y, preds)),
+        "mae": float(mean_absolute_error(y, preds)),
         "nTest": int(len(y)),
         "nTrain": int(len(train_valid)),
-        "samples": cards,
     }
+    print(f"{model_name}: {metrics}  ({time.time() - t0:.0f}s)")
+
+    test = test.assign(_pred=preds)
+    # Random subset of the held-out test listings; the site shuffles it again.
+    sample = test.sample(n=min(args.n_samples, len(test)), random_state=SEED)
+    cards = [card(r, r["_pred"]) for _, r in sample.iterrows()]
+
+    OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"model": model_name, "metrics": metrics, "samples": cards}
     OUT_FILE.write_text(
         "// Generated by precompute.py. Do not edit by hand.\n"
         "window.GAME_DATA = " + json.dumps(payload, ensure_ascii=False) + ";\n",

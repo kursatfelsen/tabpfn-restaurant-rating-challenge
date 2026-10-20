@@ -365,3 +365,7 @@ dialog.results { max-width: 620px; }
 .share-btn.li { color: #0a66c2; }
 .share-btn.wa { color: #128c4b; }
 .share + .you-line { margin-top: 8px; white-space: pre-line; user-select: all; }
+.legend .truth i { background: var(--text); border-radius: 2px; width: 14px; height: 3px; }
+.legend .you i, .legend .bot i { border-radius: 50%; }
+.legend { flex-wrap: wrap; row-gap: 4px; }
+.legend .key { white-space: nowrap; }

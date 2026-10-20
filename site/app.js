@@ -821,35 +821,39 @@
   const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const CHART_MAX_ROUNDS = 30;
 
-  // Grouped columns of absolute error per round, you vs TabPFN, as an SVG string.
-  // Used both on the page and inside the share image.
-  function errorChartSVG(R, { w = 560, h = 220, font = "Roboto, Arial, sans-serif", fs = 11 } = {}) {
-    const pad = { l: fs * 3.4, r: 8, t: 10, b: fs * 2.4 };
+  // Point plot per round on the rating scale: the real rating as a dash, your guess
+  // and TabPFN's as dots beside it, each joined to the dash by its miss.
+  // Returns an SVG string, used both on the page and inside the share image.
+  function ratingChartSVG(R, { w = 560, h = 240, font = "Roboto, Arial, sans-serif", fs = 11 } = {}) {
+    const k = fs / 11; // scale marks with the label size
+    const pad = { l: fs * 3, r: 10 * k, t: 12 * k, b: fs * 2.4 };
     const iw = w - pad.l - pad.r, ih = h - pad.t - pad.b;
-    const errs = R.map((r) => [Math.abs(r.guess - r.rate), Math.abs(r.bot - r.rate)]);
-    const top = Math.max(0.5, Math.ceil(Math.max(...errs.flat()) * 4) / 4);
-    const y = (v) => pad.t + ih - (v / top) * ih;
+    // Zoom to the data, in half-star steps, inside the 1 to 5 scale.
+    const vals = R.flatMap((r) => [r.guess, r.bot, r.rate]);
+    let lo = Math.max(1, Math.floor((Math.min(...vals) - 0.1) * 2) / 2);
+    let hi = Math.min(5, Math.ceil((Math.max(...vals) + 0.1) * 2) / 2);
+    if (hi - lo < 1) { lo = Math.max(1, hi - 1); hi = Math.min(5, lo + 1); }
+    const y = (v) => pad.t + ih - ((v - lo) / (hi - lo)) * ih;
     const band = iw / R.length;
-    const bw = Math.min(24, (band - 6) / 2);
     let s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" font-family="${font}">`;
-    // Recessive grid and y labels.
-    const step = top <= 1 ? 0.25 : top <= 2 ? 0.5 : 1;
-    for (let v = 0; v <= top + 1e-9; v += step) {
-      s += `<line x1="${pad.l}" x2="${w - pad.r}" y1="${y(v)}" y2="${y(v)}" stroke="${v ? "#eceef0" : "#bdc1c6"}" stroke-width="1"/>`;
-      s += `<text x="${pad.l - 6}" y="${y(v) + 4}" font-size="${fs}" fill="#5f6368" text-anchor="end">${v.toFixed(2)}</text>`;
+    for (let v = lo; v <= hi + 1e-9; v += 0.5) {
+      s += `<line x1="${pad.l}" x2="${w - pad.r}" y1="${y(v)}" y2="${y(v)}" stroke="#eceef0" stroke-width="1"/>`;
+      s += `<text x="${pad.l - 6 * k}" y="${y(v) + fs * 0.35}" font-size="${fs}" fill="#5f6368" text-anchor="end">${v.toFixed(1)}</text>`;
     }
-    // Columns with a 4px rounded data end, square at the baseline.
-    const col = (x, v, fill) => {
-      const hgt = Math.max(v > 0 ? 2 : 0, (v / top) * ih), r = Math.min(4, hgt / 2, bw / 2), b = y(0);
-      return `<path d="M${x},${b} V${b - hgt + r} Q${x},${b - hgt} ${x + r},${b - hgt} H${x + bw - r} Q${x + bw},${b - hgt} ${x + bw},${b - hgt + r} V${b} Z" style="fill:${fill}"/>`;
-    };
     const every = Math.ceil(R.length / 15);
+    const dot = (cx, v, fill) => `<circle cx="${cx}" cy="${y(v)}" r="${5 * k}" style="fill:${fill}" stroke="#fff" stroke-width="${1.5 * k}"/>`;
     R.forEach((r, i) => {
       const cx = pad.l + band * i + band / 2;
       const name = BY_ID.get(r.id)?.name ?? "";
-      s += `<g><title>${esc(`${i + 1}. ${name}: you ${r.guess.toFixed(1)} (off ${f2(errs[i][0])}), ${MODEL_SHORT} ${f2(r.bot)} (off ${f2(errs[i][1])}), actual ${r.rate.toFixed(1)}`)}</title>`;
+      const eu = Math.abs(r.guess - r.rate), eb = Math.abs(r.bot - r.rate);
+      s += `<g><title>${esc(`${i + 1}. ${name}: actual ${r.rate.toFixed(1)}, you ${r.guess.toFixed(1)} (off ${f2(eu)}), ${MODEL_SHORT} ${f2(r.bot)} (off ${f2(eb)})`)}</title>`;
       s += `<rect x="${cx - band / 2}" y="${pad.t}" width="${band}" height="${ih}" fill="transparent"/>`;
-      s += col(cx - bw - 1, errs[i][0], "var(--you, #1a73e8)") + col(cx + 1, errs[i][1], "var(--bot, #e8710a)");
+      // You on the left, TabPFN on the right, the real rating as a dash across both.
+      const off = Math.min(band * 0.2, 7 * k), half = Math.min(band * 0.38, 15 * k);
+      s += `<line x1="${cx - off}" x2="${cx - off}" y1="${y(r.rate)}" y2="${y(r.guess)}" style="stroke:var(--you, #1a73e8)" stroke-opacity=".4" stroke-width="${2 * k}"/>`;
+      s += `<line x1="${cx + off}" x2="${cx + off}" y1="${y(r.rate)}" y2="${y(r.bot)}" style="stroke:var(--bot, #e8710a)" stroke-opacity=".5" stroke-width="${2 * k}"/>`;
+      s += `<line x1="${cx - half}" x2="${cx + half}" y1="${y(r.rate)}" y2="${y(r.rate)}" stroke="#202124" stroke-width="${3 * k}" stroke-linecap="round"/>`;
+      s += dot(cx - off, r.guess, "var(--you, #1a73e8)") + dot(cx + off, r.bot, "var(--bot, #e8710a)");
       if (i % every === 0 || i === R.length - 1) s += `<text x="${cx}" y="${h - fs * 0.7}" font-size="${fs}" fill="#5f6368" text-anchor="middle">${i + 1}</text>`;
       s += `</g>`;
     });
@@ -861,32 +865,30 @@
     const st = stats(shown);
     const wrap = el("figure", { class: "chart" });
     const cap = el("figcaption");
-    cap.append(el("span", { class: "chart-title" }, R.length > shown.length ? `Error per round, last ${shown.length}` : "Error per round"));
+    cap.append(el("span", { class: "chart-title" }, R.length > shown.length ? `Guesses per round, last ${shown.length}` : "Guesses per round"));
     const legend = el("span", { class: "legend" });
-    [["you", `You · MAE ${f2(st.mae)}`], ["bot", `${MODEL_SHORT} · MAE ${f2(st.botMae)}`]].forEach(([c, t]) => {
+    [["you", `You · MAE ${f2(st.mae)}`], ["bot", `${MODEL_SHORT} · MAE ${f2(st.botMae)}`], ["truth", "Real rating"]].forEach(([c, t]) => {
       const it = el("span", { class: "key " + c }); it.append(el("i"), document.createTextNode(t)); legend.append(it);
     });
     cap.append(legend);
     const plot = el("div", { class: "chart-plot" });
     // Draw at roughly the on-screen width so labels stay readable on phones.
     const w = Math.round(Math.min(560, Math.max(300, window.innerWidth - 90)));
-    plot.innerHTML = errorChartSVG(shown, { w, h: w < 420 ? 200 : 220 }); // every interpolated string is escaped
+    plot.innerHTML = ratingChartSVG(shown, { w, h: w < 420 ? 220 : 240 }); // every interpolated string is escaped
     plot.firstChild.removeAttribute("width"); plot.firstChild.removeAttribute("height");
     plot.firstChild.setAttribute("role", "img");
-    plot.firstChild.setAttribute("aria-label", `Absolute error per round. Your MAE ${f2(st.mae)}, ${MODEL_SHORT} MAE ${f2(st.botMae)}.`);
-    wrap.append(cap, plot, el("div", { class: "chart-note" }, "Distance from the real Zomato rating. Shorter is better. Hover a round for details."));
+    plot.firstChild.setAttribute("aria-label", `Your guess, the ${MODEL_SHORT} guess and the real rating for each round. Your MAE ${f2(st.mae)}, ${MODEL_SHORT} MAE ${f2(st.botMae)}.`);
+    wrap.append(cap, plot, el("div", { class: "chart-note" }, "The dash is the real Zomato rating. A dot on the dash is a perfect guess. Hover a round for details."));
     return wrap;
   }
 
   const shareUrl = (tab) => location.origin + location.pathname.replace(/index\.html$/, "") + (tab === "challenge" ? "#challenge" : "");
+  // Plain text only: emoji turn into "?" boxes in some share targets. Every line
+  // ends in punctuation so it still reads well where line breaks get dropped.
   function shareText(tab, run, st) {
-    const grid = run.results.slice(-CHALLENGE_LEN).map((r) => {
-      const d = Math.abs(r.guess - r.rate) - Math.abs(r.bot - r.rate);
-      return d < -1e-9 ? "🟦" : d > 1e-9 ? "🟧" : "⬜";
-    }).join("");
-    const head = tab === "challenge" ? `Beat TabPFN · Daily ${CHALLENGE_LEN} · ${run.day}` : `Beat TabPFN · Free play · ${st.n} rounds`;
-    const verdict = st.mae < st.botMae - 1e-9 ? "I beat TabPFN! 🎉" : `I won ${st.wins} of ${st.n} rounds.`;
-    return `${head}\nMy MAE: ${f2(st.mae)} · ${MODEL_SHORT}: ${f2(st.botMae)}\n${verdict}\n${grid}\nCan you beat it? ${shareUrl(tab)}`;
+    const head = tab === "challenge" ? `I played Beat TabPFN (Daily ${CHALLENGE_LEN}, ${run.day}).` : `I played ${st.n} rounds of Beat TabPFN.`;
+    const verdict = st.mae < st.botMae - 1e-9 ? "I beat TabPFN!" : `I won ${st.wins} of ${st.n} rounds.`;
+    return `${head}\nMy MAE: ${f2(st.mae)}. ${MODEL_SHORT}: ${f2(st.botMae)}.\n${verdict}\nCan you beat it? ${shareUrl(tab)}`;
   }
 
   // 1200x630 PNG of the result, for posts and chats.
@@ -894,7 +896,7 @@
     const shown = run.results.slice(-CHART_MAX_ROUNDS);
     const font = "Roboto, Helvetica, Arial, sans-serif";
     const title = tab === "challenge" ? `Daily ${CHALLENGE_LEN} · ${run.day}` : `Free play · ${st.n} rounds`;
-    const chart = errorChartSVG(shown, { w: 1100, h: 285, font, fs: 17 })
+    const chart = ratingChartSVG(shown, { w: 1100, h: 285, font, fs: 17 })
       .replace("<svg ", `<svg x="50" y="292" `).replace(/var\(--you, (#\w+)\)/g, "$1").replace(/var\(--bot, (#\w+)\)/g, "$1");
     const stat = (x, label, value, color) =>
       `<rect x="${x}" y="120" width="330" height="120" rx="18" fill="#f8f9fa"/>` +
@@ -908,9 +910,10 @@
       ${stat(50, "Your MAE", f2(st.mae), "#1a73e8")}
       ${stat(435, `${MODEL_SHORT} MAE`, f2(st.botMae), "#b85a00")}
       ${stat(820, "Rounds won", `${st.wins} / ${st.n}`, "#202124")}
-      <rect x="50" y="262" width="14" height="14" rx="3" fill="#1a73e8"/><text x="72" y="275" font-size="16" fill="#5f6368">You</text>
-      <rect x="120" y="262" width="14" height="14" rx="3" fill="#e8710a"/><text x="142" y="275" font-size="16" fill="#5f6368">${esc(MODEL_SHORT)}</text>
-      <text x="1150" y="275" font-size="16" fill="#5f6368" text-anchor="end">Error per round, shorter is better</text>
+      <circle cx="57" cy="269" r="7" fill="#1a73e8"/><text x="72" y="275" font-size="16" fill="#5f6368">You</text>
+      <circle cx="127" cy="269" r="7" fill="#e8710a"/><text x="142" y="275" font-size="16" fill="#5f6368">${esc(MODEL_SHORT)}</text>
+      <line x1="${150 + MODEL_SHORT.length * 9 + 14}" x2="${150 + MODEL_SHORT.length * 9 + 30}" y1="269" y2="269" stroke="#202124" stroke-width="3" stroke-linecap="round"/><text x="${150 + MODEL_SHORT.length * 9 + 36}" y="275" font-size="16" fill="#5f6368">Real rating</text>
+      <text x="1150" y="275" font-size="16" fill="#5f6368" text-anchor="end">A dot on the dash is a perfect guess</text>
       ${chart}
       <text x="50" y="606" font-size="22" fill="#1a73e8">${esc(shareUrl(tab).replace(/^https?:\/\//, ""))}</text>
     </svg>`;

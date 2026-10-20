@@ -515,6 +515,7 @@
     state.results.push({ id: s.id, guess: state.guess, bot: s.tabpfn, rate: s.rate });
     state.revealed = true;
     save();
+    if (challengeDone()) autoPost();
     showReveal();
     renderScores();
   }
@@ -759,7 +760,7 @@
 
     box.append(el("div", { class: "you-title" }, isCh ? `Your Daily ${CHALLENGE_LEN}` : "Your free-play run"));
     box.append(statGrid(st));
-    if (isCh && run.submitted) box.append(el("div", { class: "you-line ok" }, `Posted as ${run.postedName || store.get(NAME_KEY) || "you"}.`));
+    if (isCh && run.submitted) box.append(el("div", { class: "you-line ok" }, `Posted as ${run.postedName || ANON}.`));
     const go = el("button", { class: "primary-btn small", type: "button" },
       isCh && run.submitted ? "See result & share" : "See result, post & share");
     go.addEventListener("click", () => { board.close(); openResults(tab); });
@@ -776,14 +777,46 @@
     return grid;
   }
 
-  // Name field that posts the run to its board.
+  const ANON = "Anonymous";
+  async function postRun(tab, run, st, name) {
+    const isCh = tab === "challenge";
+    const [res] = await rpc("submit_score", {
+      p_player: playerId, p_name: name, p_mode: tab, p_day: isCh ? run.day : null,
+      p_rounds: st.n, p_mae: +st.mae.toFixed(4), p_rmse: +st.rmse.toFixed(4),
+      p_wins: st.wins, p_bot_mae: +st.botMae.toFixed(4),
+    });
+    if (isCh) run.submitted = true;
+    else run.postedMae = Math.min(run.postedMae ?? Infinity, Number(res.best_mae));
+    run.postedName = name;
+    run.postedRank = `#${res.rank_pos} of ${res.total}`;
+    saveRun(tab, run);
+    return run.postedRank;
+  }
+
+  // A finished Daily run is posted anonymously straight away, so every result
+  // counts. Adding a name later only renames that row.
+  const autoPosting = new Map();
+  function autoPost() {
+    const run = runFor("challenge");
+    if (!lbReady || run.submitted || run.results.length < CHALLENGE_LEN) return Promise.resolve();
+    if (!autoPosting.has(run.day)) {
+      autoPosting.set(run.day, postRun("challenge", run, stats(run.results), ANON)
+        .then(() => { if (mode === "challenge") state = load("challenge") || state; })
+        .catch(() => autoPosting.delete(run.day))); // retried next time the result opens
+    }
+    return autoPosting.get(run.day);
+  }
+
+  // Optional name field. Left blank, the score goes up as "Anonymous".
   function postForm(tab, run, st, onPosted) {
     const isCh = tab === "challenge";
+    const rename = isCh && run.submitted;
     const wrap = el("div", { class: "post" });
     const form = el("form", { class: "you-form" });
-    const input = el("input", { type: "text", maxlength: "24", required: "", placeholder: "Your name", "aria-label": "Your name", autocomplete: "nickname" });
+    const input = el("input", { type: "text", maxlength: "24", placeholder: "Your name (optional)", "aria-label": "Your name", autocomplete: "nickname" });
     input.value = store.get(NAME_KEY) || "";
-    const btn = el("button", { class: "primary-btn small", type: "submit" }, !isCh && run.postedMae != null ? "Update score" : "Post score");
+    const btn = el("button", { class: "primary-btn small", type: "submit" },
+      rename ? "Add name" : !isCh && run.postedMae != null ? "Update score" : "Post score");
     form.append(input, btn);
     const msg = el("div", { class: "you-line" });
     if (!isCh && run.postedMae != null && st.mae >= run.postedMae - 1e-9) {
@@ -793,21 +826,12 @@
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const name = input.value.trim().replace(/\s+/g, " ");
-      if (!name) return;
+      const typed = input.value.trim().replace(/\s+/g, " ");
+      if (rename && !typed) return;
+      if (typed) store.set(NAME_KEY, typed);
       btn.disabled = true; msg.className = "you-line"; msg.textContent = "Posting…";
-      store.set(NAME_KEY, name);
       try {
-        const [res] = await rpc("submit_score", {
-          p_player: playerId, p_name: name, p_mode: tab, p_day: isCh ? run.day : null,
-          p_rounds: st.n, p_mae: +st.mae.toFixed(4), p_rmse: +st.rmse.toFixed(4),
-          p_wins: st.wins, p_bot_mae: +st.botMae.toFixed(4),
-        });
-        if (isCh) { run.submitted = true; run.postedName = name; }
-        else run.postedMae = Math.min(run.postedMae ?? Infinity, Number(res.best_mae));
-        run.postedRank = `#${res.rank_pos} of ${res.total}`;
-        saveRun(tab, run);
-        onPosted(run.postedRank);
+        onPosted(await postRun(tab, run, st, typed || ANON));
       } catch (err) {
         btn.disabled = false;
         msg.className = "you-line err";
@@ -981,10 +1005,24 @@
     body.append(statGrid(st), chartBlock(run.results));
 
     const posted = el("div", { class: "you-line ok" });
-    const showPosted = (rank) => { posted.textContent = `Posted as ${run.postedName || store.get(NAME_KEY)}${rank ? ` · you're ${rank}` : ""}.`; };
-    if (isCh && run.submitted) { showPosted(run.postedRank); body.append(posted); }
-    else if (lbReady && st.n >= (isCh ? CHALLENGE_LEN : ENDLESS_MIN)) {
-      const form = postForm(tab, run, st, (rank) => { form.replaceWith(posted); if (!isCh) run.postedName = store.get(NAME_KEY); showPosted(rank); });
+    const rankText = (rank) => (rank ? ` · you're ${rank}` : "");
+    const showPosted = (rank) => { posted.textContent = `Posted as ${run.postedName || ANON}${rankText(rank)}.`; };
+    const done = st.n >= (isCh ? CHALLENGE_LEN : ENDLESS_MIN);
+    if (isCh && done && !run.submitted && lbReady) {
+      posted.className = "you-line";
+      posted.textContent = "Posting your score…";
+      body.append(posted);
+      autoPost().then(() => { if (results.open && runFor("challenge").submitted) openResults("challenge"); });
+    } else if (isCh && run.submitted && (run.postedName || ANON) === ANON) {
+      // Posted anonymously. Offer to put a name on it.
+      posted.className = "you-line";
+      posted.textContent = `Posted anonymously${rankText(run.postedRank)}. Add your name to show it on the leaderboard.`;
+      const form = postForm(tab, run, st, (rank) => { form.replaceWith(posted); posted.className = "you-line ok"; showPosted(rank); });
+      body.append(posted, form);
+    } else if (isCh && run.submitted) {
+      showPosted(run.postedRank); body.append(posted);
+    } else if (lbReady && done) {
+      const form = postForm(tab, run, st, (rank) => { form.replaceWith(posted); showPosted(rank); });
       body.append(form);
     }
     body.append(shareRow(tab, run, st));

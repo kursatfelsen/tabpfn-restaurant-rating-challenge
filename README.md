@@ -37,10 +37,10 @@ be hosted on any static host, such as GitHub Pages, Netlify or S3.
 
 ## Modes and leaderboards
 
-- **Free play** is endless. A score can be posted after 30 rounds, and the
+- **Free play** is endless. A score can be posted after 30 rounds, with an optional name, and the
   board keeps each player's best MAE.
 - **Daily 15** gives everyone the same 15 restaurants, picked from the UTC
-  date. There is one attempt per day, and a posted score is final. The result screen shows your error and TabPFN's for each round, and has buttons to share the score as text or as an image.
+  date. There is one attempt per day. A finished run is posted as "Anonymous" right away, and the player can add a name later. The score itself is final. The result screen shows your error and TabPFN's for each round, and has buttons to share the score as text or as an image.
 
 Both boards are stored in Supabase. To connect them:
 

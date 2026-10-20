@@ -48,7 +48,7 @@ it also works under a custom domain.
 ```bash
 uv venv .venv && uv pip install --python .venv/bin/python tabpfn-client tabpfn "scikit-learn==1.6.1" "pandas==2.3.3"
 
-# Cookbook setup: TabPFN 3.5 through the API. Needs an API key from ux.priorlabs.ai.
+# Cookbook setup: TabPFN 3.5 through the API. Needs an API key from https://platform.priorlabs.ai/account/api-keys.
 TABPFN_TOKEN=... .venv/bin/python precompute.py --backend api
 
 # Offline fallback: open-source TabPFN v3 on your own machine.

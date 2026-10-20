@@ -32,7 +32,7 @@
         <div class="score-sub">RMSE <b id="you-rmse">–</b> · wins <b id="you-wins">0</b></div>
       </div>
       <div class="vs">
-        <div class="round">Round <b id="round-no">1</b></div>
+        <div class="round">Round <b id="round-no">1</b><span id="round-of"></span></div>
         <div class="vs-text">vs</div>
       </div>
       <div class="score-card bot">
@@ -43,7 +43,12 @@
     </div>
 
     <div class="top-actions">
-      <button class="ghost" id="how-btn" type="button">How it works</button>
+      <div class="seg mode-switch" role="group" aria-label="Game mode">
+        <button type="button" data-mode="endless">Free play</button>
+        <button type="button" data-mode="challenge">Daily 30</button>
+      </div>
+      <button class="ghost trophy" id="lb-btn" type="button"><span aria-hidden="true">🏆</span><span class="lbl">Leaderboard</span></button>
+      <button class="ghost round-btn" id="how-btn" type="button" aria-label="How it works" title="How it works">?</button>
       <button class="ghost" id="reset-btn" type="button">Reset</button>
     </div>
   </header>
@@ -73,7 +78,7 @@
         <div class="tabs" role="tablist">
           <button class="tab active" data-tab="overview" role="tab">Overview</button>
           <button class="tab" data-tab="menu" role="tab">Menu</button>
-          <button class="tab" data-tab="reviews" role="tab">Reviews</button>
+          <button class="tab" data-tab="reviews" role="tab" id="tab-reviews">Reviews</button>
         </div>
 
         <div class="actions">
@@ -120,6 +125,7 @@
 
       <!-- Guess card -->
       <div class="guess-card" id="guess-card">
+        <div class="progress" id="progress" hidden><i></i></div>
         <div class="guess-view" id="guess-view">
           <div class="guess-title">What is this place rated on Zomato?</div>
           <div class="guess-value">
@@ -154,11 +160,28 @@
     <p>Each card is a real restaurant listing from the Zomato Bangalore dataset. You see what a diner would see: votes, price, cuisine, popular dishes and customer reviews. The overall rating is hidden.</p>
     <p>TabPFN made its prediction before you arrived. It was fitted on <b id="how-ntrain">37,498</b> other listings and never saw any of the restaurants in this game. The setup follows the Prior Labs cookbook <a href="https://docs.priorlabs.ai/cookbook/zomato_model_comparison" target="_blank" rel="noopener">Predict Restaurant Ratings with TabPFN 3.5</a>.</p>
     <p>This is a regression task, so both players are scored on error, where lower is better. <b>MAE</b> is the average distance from the real rating. <b>RMSE</b> is the root mean squared error, which punishes big misses more. The player closer to the real rating wins the round.</p>
+    <p><b>Free play</b> is endless. <b>Daily 30</b> gives everyone the same 30 restaurants each day, with one attempt. Both have a leaderboard ranked by MAE.</p>
     <p class="fine" id="how-model"></p>
     <p class="fine">The map is decorative. Streets and neighbours are generated, not real locations.</p>
     <form method="dialog"><button class="primary-btn" type="submit" autofocus>Let's play</button></form>
   </dialog>
 
+  <!-- Leaderboard -->
+  <dialog id="lb" class="lb" aria-labelledby="lb-title">
+    <div class="lb-head">
+      <h2 id="lb-title">🏆 Leaderboard</h2>
+      <form method="dialog"><button class="icon-btn" type="submit" aria-label="Close">×</button></form>
+    </div>
+    <div class="seg lb-tabs" role="group" aria-label="Leaderboard">
+      <button type="button" data-board="challenge">Daily 30</button>
+      <button type="button" data-board="endless">Free play</button>
+    </div>
+    <p class="lb-sub" id="lb-sub"></p>
+    <div class="lb-you" id="lb-you"></div>
+    <div class="lb-rows" id="lb-rows"></div>
+  </dialog>
+
+  <script src="config.js"></script>
   <script src="data/samples.js"></script>
   <script src="app.js"></script>
 </body>

@@ -35,6 +35,29 @@ python3 -m http.server 8000 --directory site
 The site is fully static. Predictions live in `site/data/samples.js`, so it can
 be hosted on any static host, such as GitHub Pages, Netlify or S3.
 
+## Modes and leaderboards
+
+- **Free play** is endless. A score can be posted after 30 rounds, and the
+  board keeps each player's best MAE.
+- **Daily 30** gives everyone the same 30 restaurants, picked from the UTC
+  date. There is one attempt per day, and a posted score is final.
+
+Both boards are stored in Supabase. To connect them:
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. Open the **SQL editor**, paste `supabase/schema.sql` and run it.
+3. Copy the project URL and the anon or publishable key from
+   **Project Settings → API** into `site/config.js`.
+
+The key is public by design. The `scores` table isn't readable or writable
+with it. The browser can only call `submit_score`, which validates the input,
+and `get_leaderboard`, which never returns player ids. Each browser gets a
+random player id, and only that browser can update its own row.
+
+Scores are computed in the browser, and the true ratings ship with the page,
+so a determined player can fake a score. That's acceptable for a fun board,
+but it isn't proof of skill.
+
 ## Deploy to GitHub Pages
 
 `.github/workflows/pages.yml` publishes the `site/` folder on every push to
@@ -80,8 +103,10 @@ items. Expect it to be less accurate than the API model.
 | `precompute.py` | Loads data, reproduces the cookbook split, runs TabPFN, exports game data. |
 | `site/index.html` | Page layout: scoreboard, place panel, map, guess card. |
 | `site/style.css` | Maps-style look. |
-| `site/app.js` | Game logic, scoring, procedural map, local save of progress. |
+| `site/app.js` | Game logic, modes, scoring, leaderboards, procedural map, local save of progress. |
 | `site/data/samples.js` | Generated listings plus TabPFN predictions. |
+| `site/config.js` | Supabase URL and public key for the leaderboards. |
+| `supabase/schema.sql` | Leaderboard table and functions. Run once in Supabase. |
 
 The map is decorative. Streets, parks and neighbouring places are generated
 from a seed per restaurant. They are not real locations. The page uses no

@@ -202,11 +202,8 @@ def predict_local(train_valid: pd.DataFrame, test: pd.DataFrame) -> tuple[np.nda
 # ------------------------------------------------------------------------ export
 def card(row: pd.Series, pred: float) -> dict:
     reviews = parse_reviews(row["reviews_list"])
-    shown = [
-        {"stars": s, "text": t[:420] + ("…" if len(t) > 420 else "")}
-        for s, t in reviews
-        if t
-    ][:6]
+    # Every written review, in full. The scrape repeats many reviews verbatim.
+    shown = list({(s, t): {"stars": s, "text": t} for s, t in reviews if t}.values())
     hist = [0, 0, 0, 0, 0]
     for s, _ in reviews:
         if s is not None and 1 <= s <= 5:

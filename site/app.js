@@ -10,7 +10,16 @@
   }
   const SAMPLES = DATA.samples;
   const BY_ID = new Map(SAMPLES.map((s) => [s.id, s]));
-  const STORE_KEY = "beat-tabpfn-v1:" + DATA.model + ":" + SAMPLES.length;
+  const CHALLENGE_LEN = 30; // rounds in the daily challenge
+  const ENDLESS_MIN = 30;   // free-play rounds needed before posting a score
+  // Free play keeps the original key so existing progress survives.
+  const STORE_KEYS = {
+    endless: "beat-tabpfn-v1:" + DATA.model + ":" + SAMPLES.length,
+    challenge: "beat-tabpfn-v1:challenge:" + DATA.model + ":" + SAMPLES.length,
+  };
+  const MODE_KEY = "beat-tabpfn-mode";
+  const PLAYER_KEY = "beat-tabpfn-player";
+  const NAME_KEY = "beat-tabpfn-name";
 
   const $ = (id) => document.getElementById(id);
   const el = (tag, attrs = {}, text) => {
@@ -49,21 +58,61 @@
   }
 
   // ------------------------------------------------------------------- state
-  let state = load() || fresh();
-  function fresh() {
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* storage unavailable */ } },
+  };
+  // The challenge day is the UTC date, so everyone gets the same set at once.
+  const today = () => new Date().toISOString().slice(0, 10);
+  function hashStr(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+  function challengeOrder(day) {
+    return shuffle(SAMPLES.map((s) => s.id), rng(hashStr("challenge:" + day))).slice(0, CHALLENGE_LEN);
+  }
+
+  let mode = location.hash === "#challenge" ? "challenge" : store.get(MODE_KEY) === "challenge" ? "challenge" : "endless";
+  let state = load(mode) || fresh(mode);
+  function fresh(m) {
+    if (m === "challenge") {
+      const day = today();
+      return { day, order: challengeOrder(day), idx: 0, results: [], revealed: false, guess: 3.7, submitted: false };
+    }
     return { order: shuffle(SAMPLES.map((s) => s.id)), idx: 0, results: [], revealed: false, guess: 3.7 };
   }
-  function load() {
+  function load(m) {
     try {
-      const s = JSON.parse(localStorage.getItem(STORE_KEY));
-      if (s && Array.isArray(s.order) && s.order.every((id) => BY_ID.has(id))) return s;
-    } catch (_) { /* storage unavailable */ }
+      const s = JSON.parse(store.get(STORE_KEYS[m]));
+      if (!s || !Array.isArray(s.order) || !s.order.every((id) => BY_ID.has(id))) return null;
+      // A challenge run from an earlier day is over. Start today's set.
+      if (m === "challenge" && s.day !== today()) return null;
+      return s;
+    } catch (_) { /* corrupt or missing */ }
     return null;
   }
-  function save() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (_) { /* ignore */ }
-  }
+  function save() { store.set(STORE_KEYS[mode], JSON.stringify(state)); }
   const current = () => BY_ID.get(state.order[state.idx % state.order.length]);
+  const challengeDone = () => mode === "challenge" && state.results.length >= CHALLENGE_LEN;
+
+  function stats(R) {
+    const n = R.length;
+    if (!n) return { n, mae: null, rmse: null, botMae: null, botRmse: null, wins: 0, losses: 0 };
+    const mean = (f) => R.reduce((a, r) => a + f(r), 0) / n;
+    let wins = 0, losses = 0;
+    R.forEach((r) => {
+      const d = Math.abs(r.guess - r.rate) - Math.abs(r.bot - r.rate);
+      if (d < -1e-9) wins++; else if (d > 1e-9) losses++;
+    });
+    return {
+      n, wins, losses,
+      mae: mean((r) => Math.abs(r.guess - r.rate)),
+      rmse: Math.sqrt(mean((r) => (r.guess - r.rate) ** 2)),
+      botMae: mean((r) => Math.abs(r.bot - r.rate)),
+      botRmse: Math.sqrt(mean((r) => (r.bot - r.rate) ** 2)),
+    };
+  }
 
   // ------------------------------------------------------------------- stars
   let gradSeq = 0;
@@ -198,7 +247,10 @@
 
     const revs = $("p-reviews");
     revs.replaceChildren();
+    $("tab-reviews").textContent = s.reviews.length ? `Reviews (${s.reviews.length})` : "Reviews";
     if (!s.reviews.length) revs.append(el("div", { class: "review empty" }, "No written reviews."));
+    else revs.append(el("div", { class: "reviews-count" },
+      `${s.reviews.length} written review${s.reviews.length === 1 ? "" : "s"} on this listing`));
     s.reviews.forEach((rv, i) => {
       const box = el("div", { class: "review" });
       const head = el("div", { class: "review-head" });
@@ -209,7 +261,18 @@
       head.append(av, who);
       box.append(head);
       if (rv.stars != null) box.append(starsEl(rv.stars));
-      box.append(el("div", { class: "review-text" }, rv.text));
+      const text = el("div", { class: "review-text" }, rv.text);
+      box.append(text);
+      // Long reviews start collapsed.
+      if (rv.text.length > 360) {
+        text.classList.add("clamped");
+        const more = el("button", { class: "more", type: "button" }, "Read more");
+        more.addEventListener("click", () => {
+          const open = text.classList.toggle("clamped");
+          more.textContent = open ? "Read more" : "Show less";
+        });
+        box.append(more);
+      }
       revs.append(box);
     });
 
@@ -445,7 +508,7 @@
   range.addEventListener("input", () => setGuess(parseFloat(range.value)));
 
   function submit() {
-    if (state.revealed) return;
+    if (state.revealed || challengeDone()) return;
     const s = current();
     state.results.push({ id: s.id, guess: state.guess, bot: s.tabpfn, rate: s.rate });
     state.revealed = true;
@@ -456,6 +519,7 @@
 
   function next() {
     if (!state.revealed) return;
+    if (challengeDone()) { openBoard("challenge"); return; }
     state.idx += 1;
     if (state.idx >= state.order.length) { state.order = shuffle(state.order); state.idx = 0; }
     state.revealed = false;
@@ -502,32 +566,38 @@
       sc.append(m);
       requestAnimationFrame(() => requestAnimationFrame(() => (m.style.left = pos(x))));
     });
+    $("next-btn").textContent = challengeDone() ? "See your result 🏁" : "Next restaurant →";
     $("next-btn").focus();
   }
 
   function renderScores() {
     const R = state.results;
-    const n = R.length;
-    const mae = (k) => (n ? (R.reduce((a, r) => a + Math.abs(r[k] - r.rate), 0) / n).toFixed(2) : "–");
-    const rmse = (k) => (n ? Math.sqrt(R.reduce((a, r) => a + (r[k] - r.rate) ** 2, 0) / n).toFixed(2) : "–");
-    let wy = 0, wb = 0;
+    const st = stats(R);
+    const fmt = (v) => (v == null ? "—" : v.toFixed(2));
     const hist = $("history");
     hist.replaceChildren();
     R.forEach((r) => {
       const d = Math.abs(r.guess - r.rate) - Math.abs(r.bot - r.rate);
       const c = Math.abs(d) < 1e-9 ? "t" : d < 0 ? "w" : "l";
-      if (c === "w") wy++; else if (c === "l") wb++;
       hist.append(el("span", { class: c, title: `${BY_ID.get(r.id)?.name}: you ${r.guess.toFixed(1)}, TabPFN ${r.bot.toFixed(2)}, actual ${r.rate.toFixed(1)}` }));
     });
     // Keep the history strip short.
     while (hist.children.length > 40) hist.firstChild.remove();
-    $("you-mae").textContent = mae("guess");
-    $("bot-mae").textContent = mae("bot");
-    $("you-rmse").textContent = rmse("guess");
-    $("bot-rmse").textContent = rmse("bot");
-    $("you-wins").textContent = wy;
-    $("bot-wins").textContent = wb;
-    $("round-no").textContent = n + (state.revealed ? 0 : 1);
+    $("you-mae").textContent = fmt(st.mae);
+    $("bot-mae").textContent = fmt(st.botMae);
+    $("you-mae").classList.toggle("na", st.mae == null);
+    $("bot-mae").classList.toggle("na", st.botMae == null);
+    $("you-rmse").textContent = fmt(st.rmse);
+    $("bot-rmse").textContent = fmt(st.botRmse);
+    $("you-wins").textContent = st.wins;
+    $("bot-wins").textContent = st.losses;
+
+    const round = Math.min(st.n + (state.revealed ? 0 : 1), mode === "challenge" ? CHALLENGE_LEN : Infinity);
+    $("round-no").textContent = round;
+    $("round-of").textContent = mode === "challenge" ? ` / ${CHALLENGE_LEN}` : "";
+    const prog = $("progress");
+    prog.hidden = mode !== "challenge";
+    prog.firstElementChild.style.width = `${(st.n / CHALLENGE_LEN) * 100}%`;
   }
 
   function showRound() {
@@ -548,7 +618,8 @@
   $("submit-btn").addEventListener("click", submit);
   $("next-btn").addEventListener("click", next);
   document.addEventListener("keydown", (e) => {
-    if ($("how").open) return;
+    if (document.querySelector("dialog[open]")) return;
+    if (e.target.closest?.("button, a")) return; // let focused buttons handle their own Enter
     if (e.key === "Enter") { e.preventDefault(); state.revealed ? next() : submit(); }
     else if (!state.revealed && document.activeElement !== range) {
       if (e.key === "ArrowRight" || e.key === "ArrowUp") { e.preventDefault(); setGuess(state.guess + 0.1); }
@@ -566,18 +637,248 @@
       return;
     }
     clearTimeout(resetArmed); resetArmed = null; resetBtn.textContent = "Reset";
-    state = fresh(); save(); showRound();
+    state = fresh(mode); save(); showRound();
   });
 
   const how = $("how");
+  const MODEL_SHORT = DATA.model.replace(/\s*\(.*\)/, "");
   $("how-btn").addEventListener("click", () => how.showModal());
-  $("model-name").textContent = DATA.model.replace(/\s*\(.*\)/, "");
+  $("model-name").textContent = MODEL_SHORT;
   $("how-ntrain").textContent = DATA.metrics.nTrain.toLocaleString("en-US");
   const m = DATA.metrics;
   $("how-model").textContent =
     `Model: ${DATA.model}. On all ${m.nTest.toLocaleString("en-US")} held-out test listings it scored ` +
     `R² ${m.r2.toFixed(3)}, RMSE ${m.rmse.toFixed(3)}, and MAE ${m.mae.toFixed(3)}.`;
 
+  // -------------------------------------------------------------- game mode
+  function setMode(next) {
+    if (next === mode) return;
+    save();
+    mode = next;
+    store.set(MODE_KEY, mode);
+    state = load(mode) || fresh(mode);
+    save();
+    history.replaceState(null, "", mode === "challenge" ? "#challenge" : location.pathname + location.search);
+    renderModeUI();
+    showRound();
+  }
+  function renderModeUI() {
+    document.querySelectorAll(".mode-switch button").forEach((b) => {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-pressed", on);
+    });
+    resetBtn.hidden = mode === "challenge"; // one attempt per day
+  }
+  document.querySelectorAll(".mode-switch button").forEach((b) =>
+    b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+  // ------------------------------------------------------------ leaderboard
+  const LB = window.LEADERBOARD || {};
+  const lbReady = Boolean(LB.url && LB.anonKey);
+  const playerId = (() => {
+    let id = store.get(PLAYER_KEY);
+    if (!id) {
+      id = crypto.randomUUID ? crypto.randomUUID()
+        : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) =>
+            (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16));
+      store.set(PLAYER_KEY, id);
+    }
+    return id;
+  })();
+
+  async function rpc(fn, body) {
+    const headers = { apikey: LB.anonKey, "Content-Type": "application/json" };
+    // Legacy anon keys are JWTs and also go in Authorization. Publishable keys must not.
+    if (LB.anonKey.startsWith("eyJ")) headers.Authorization = `Bearer ${LB.anonKey}`;
+    const res = await fetch(`${LB.url.replace(/\/+$/, "")}/rest/v1/rpc/${fn}`, {
+      method: "POST", headers, body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.message || `request failed (${res.status})`);
+    return data;
+  }
+
+  // TabPFN's line to beat: today's 30 for the challenge, the whole test set for free play.
+  const botLine = (tab) => {
+    if (tab === "endless") return DATA.metrics.mae;
+    const ids = challengeOrder(today());
+    return ids.reduce((a, id) => { const s = BY_ID.get(id); return a + Math.abs(s.tabpfn - s.rate); }, 0) / ids.length;
+  };
+  const runFor = (tab) => (tab === mode ? state : load(tab) || fresh(tab));
+  const saveRun = (tab, s) => store.set(STORE_KEYS[tab], JSON.stringify(s));
+
+  const board = $("lb");
+  let boardTab = "challenge";
+  let boardReq = 0;
+
+  function openBoard(tab = mode) {
+    boardTab = tab;
+    if (!board.open) board.showModal();
+    renderBoard();
+  }
+  $("lb-btn").addEventListener("click", () => openBoard());
+  document.querySelectorAll(".lb-tabs button").forEach((b) =>
+    b.addEventListener("click", () => { boardTab = b.dataset.board; renderBoard(); }));
+
+  function renderBoard() {
+    const isCh = boardTab === "challenge";
+    document.querySelectorAll(".lb-tabs button").forEach((b) => {
+      const on = b.dataset.board === boardTab;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-pressed", on);
+    });
+    $("lb-sub").textContent = isCh
+      ? `Everyone rates the same ${CHALLENGE_LEN} restaurants. A new set starts every day at 00:00 UTC.`
+      : `Endless free play. Your best MAE over at least ${ENDLESS_MIN} rounds counts.`;
+    renderYou();
+    loadRows();
+  }
+
+  // The "your run" card: progress, or a form to post the score.
+  function renderYou() {
+    const tab = boardTab, isCh = tab === "challenge";
+    const run = runFor(tab);
+    const st = stats(run.results);
+    const box = $("lb-you");
+    box.replaceChildren();
+
+    const need = isCh ? CHALLENGE_LEN : ENDLESS_MIN;
+    if (st.n < need) {
+      const left = need - st.n;
+      box.append(el("div", { class: "you-title" }, isCh ? `Today's run: ${st.n} of ${CHALLENGE_LEN}` : `Free play: ${st.n} rounds`));
+      box.append(el("div", { class: "you-line" },
+        isCh ? `Finish the remaining ${left} to post your score.` : `Play ${left} more round${left === 1 ? "" : "s"} to post a score.`));
+      const go = el("button", { class: "primary-btn small", type: "button" }, tab === mode ? "Keep playing" : isCh ? "Play the Daily 30" : "Play free play");
+      go.addEventListener("click", () => { board.close(); setMode(tab); });
+      box.append(go);
+      return;
+    }
+
+    const won = st.mae < st.botMae - 1e-9;
+    box.append(el("div", { class: "you-title" }, isCh ? (won ? "You beat TabPFN today! 🎉" : "Daily 30 complete 🏁") : "Your free-play run"));
+    const line = el("div", { class: "you-stats" });
+    [["You", st.mae, "you"], [MODEL_SHORT, st.botMae, "bot"], ["Rounds won", `${st.wins} / ${st.n}`, ""]].forEach(([k, v, c]) => {
+      const cell = el("div", { class: "you-stat " + c });
+      cell.append(el("b", {}, typeof v === "number" ? v.toFixed(3) : v), el("span", {}, typeof v === "number" ? `${k} MAE` : k));
+      line.append(cell);
+    });
+    box.append(line);
+
+    if (isCh && run.submitted) {
+      box.append(el("div", { class: "you-line ok" }, `Posted as ${run.postedName || store.get(NAME_KEY) || "you"}. Come back tomorrow for a new set.`));
+      return;
+    }
+    if (!lbReady) return;
+
+    const form = el("form", { class: "you-form" });
+    const input = el("input", { type: "text", maxlength: "24", required: "", placeholder: "Your name", "aria-label": "Your name", autocomplete: "nickname" });
+    input.value = store.get(NAME_KEY) || "";
+    const notBetter = !isCh && run.postedMae != null && st.mae >= run.postedMae - 1e-9;
+    const btn = el("button", { class: "primary-btn small", type: "submit" },
+      isCh ? "Post score" : run.postedMae != null ? "Update score" : "Post score");
+    form.append(input, btn);
+    const msg = el("div", { class: "you-line" });
+    if (notBetter) msg.textContent = `Your posted best is ${run.postedMae.toFixed(3)}. Only a lower MAE replaces it.`;
+    box.append(form, msg);
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = input.value.trim().replace(/\s+/g, " ");
+      if (!name) return;
+      btn.disabled = true; msg.className = "you-line"; msg.textContent = "Posting…";
+      store.set(NAME_KEY, name);
+      try {
+        const [res] = await rpc("submit_score", {
+          p_player: playerId, p_name: name, p_mode: tab, p_day: isCh ? run.day : null,
+          p_rounds: st.n, p_mae: +st.mae.toFixed(4), p_rmse: +st.rmse.toFixed(4),
+          p_wins: st.wins, p_bot_mae: +st.botMae.toFixed(4),
+        });
+        if (isCh) { run.submitted = true; run.postedName = name; }
+        else run.postedMae = Math.min(run.postedMae ?? Infinity, Number(res.best_mae));
+        saveRun(tab, run);
+        if (isCh) renderYou();
+        msg.className = "you-line ok";
+        msg.textContent = `You're #${res.rank_pos} of ${res.total}.`;
+        if (isCh) $("lb-you").append(msg);
+        btn.disabled = false;
+        loadRows();
+      } catch (err) {
+        btn.disabled = false;
+        msg.className = "you-line err";
+        msg.textContent = `Couldn't post your score: ${err.message}`;
+      }
+    });
+  }
+
+  async function loadRows() {
+    const body = $("lb-rows");
+    const tab = boardTab;
+    if (!lbReady) {
+      body.replaceChildren(el("p", { class: "lb-empty" }, "The leaderboard isn't connected yet. Add the Supabase URL and key to config.js."));
+      return;
+    }
+    const req = ++boardReq;
+    body.replaceChildren(el("p", { class: "lb-empty" }, "Loading…"));
+    try {
+      const rows = await rpc("get_leaderboard", {
+        p_mode: tab, p_day: tab === "challenge" ? today() : null, p_player: playerId, p_limit: 50,
+      });
+      if (req !== boardReq) return;
+      body.replaceChildren(boardTable(rows, tab));
+    } catch (err) {
+      if (req !== boardReq) return;
+      body.replaceChildren(el("p", { class: "lb-empty err" }, `Couldn't load the leaderboard: ${err.message}`));
+    }
+  }
+
+  function boardTable(rows, tab) {
+    const wrap = el("div");
+    const table = el("table", { class: "lb-table" });
+    const head = el("tr");
+    ["#", "Player", "MAE", tab === "challenge" ? "Won" : "Rounds"].forEach((h) => head.append(el("th", {}, h)));
+    table.append(el("thead"), el("tbody"));
+    table.tHead.append(head);
+    const tb = table.tBodies[0];
+
+    const line = botLine(tab);
+    let botShown = false;
+    const botRow = () => {
+      const tr = el("tr", { class: "bot-row" });
+      tr.append(el("td", {}, "🤖"), el("td", {}, `${MODEL_SHORT} (line to beat)`), el("td", {}, line.toFixed(3)),
+        el("td", {}, tab === "challenge" ? "—" : DATA.metrics.nTest.toLocaleString("en-US")));
+      tb.append(tr);
+      botShown = true;
+    };
+    const medal = ["🥇", "🥈", "🥉"];
+    rows.forEach((r, i) => {
+      const mae = Number(r.mae);
+      if (!botShown && line <= mae) botRow();
+      if (r.is_me && r.rank_pos > 50 && i > 0) {
+        const gap = el("tr", { class: "gap" }); gap.append(el("td", { colspan: "4" }, "⋯")); tb.append(gap);
+      }
+      const tr = el("tr", { class: r.is_me ? "me" : "" });
+      tr.append(
+        el("td", { class: "rank" }, medal[r.rank_pos - 1] || String(r.rank_pos)),
+        el("td", { class: "who" }, r.name + (r.is_me ? " (you)" : "")),
+        el("td", { class: "num" }, mae.toFixed(3)),
+        el("td", { class: "num" }, tab === "challenge" ? `${r.wins}/${r.rounds}` : String(r.rounds)),
+      );
+      tb.append(tr);
+    });
+    if (!botShown) botRow();
+    wrap.append(table);
+    const total = rows[0]?.total ?? 0;
+    wrap.append(el("p", { class: "lb-empty" }, total
+      ? `${total} player${total == 1 ? "" : "s"}${tab === "challenge" ? " today" : ""}. Lower MAE is better.`
+      : tab === "challenge" ? "No scores yet today. Be the first." : "No scores yet. Be the first."));
+    return wrap;
+  }
+
+  renderModeUI();
   showRound();
-  if (!state.results.length) how.showModal();
+  if (!state.results.length && !store.get(PLAYER_KEY + ":seen-how")) {
+    store.set(PLAYER_KEY + ":seen-how", "1");
+    how.showModal();
+  }
 })();

@@ -49,7 +49,7 @@ begin
     raise exception 'Name must be 1 to 24 characters';
   end if;
   if p_mode = 'challenge' then
-    if p_rounds <> 15 then raise exception 'A challenge run has exactly 15 rounds'; end if;
+    if p_rounds <> 10 then raise exception 'A challenge run has exactly 10 rounds'; end if;
     -- One day of slack either side for time zones and runs that cross midnight.
     if v_day is null or v_day not between v_today - 1 and v_today + 1 then
       raise exception 'Challenge day is out of range';

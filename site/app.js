@@ -10,7 +10,7 @@
   }
   const SAMPLES = DATA.samples;
   const BY_ID = new Map(SAMPLES.map((s) => [s.id, s]));
-  const CHALLENGE_LEN = 15; // rounds in the daily challenge
+  const CHALLENGE_LEN = 10; // rounds in the daily challenge
   const ENDLESS_MIN = 30;   // free-play rounds needed before posting a score
   // Free play keeps the original key so existing progress survives.
   const STORE_KEYS = {

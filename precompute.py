@@ -3,10 +3,13 @@
 Follows the Prior Labs cookbook "Predict Restaurant Ratings with TabPFN 3.5":
 https://docs.priorlabs.ai/cookbook/zomato_model_comparison
 
-Same data (MulTaBench curated Zomato Bangalore listings), same 80/10/10 split
-with SEED=42, TabPFN fitted on train+validation (37,498 rows) and evaluated on
-the 4,167 held-out test listings. The game only ever shows test listings, so
-TabPFN never saw any restaurant card the player is shown.
+Same data (MulTaBench curated Zomato Bangalore listings) and model setup, with
+one change: the 90/10 train/test split is made by restaurant, not by row. The
+dataset lists each restaurant 4 to 5 times (once per area and category, almost
+always with the same rating). A row split puts 95% of test restaurants into the
+training data too, and a plain lookup of the training rating then scores MAE
+0.011. Splitting by restaurant (name + address) means TabPFN has never seen any
+restaurant the player is shown, under any listing.
 
 Backends
 --------
@@ -36,7 +39,7 @@ from zipfile import ZipFile
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, r2_score, root_mean_squared_error
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 
 SEED = 42
 ROOT = Path(__file__).parent
@@ -67,8 +70,23 @@ def load_data() -> pd.DataFrame:
     return df
 
 
+SPLIT = "by-restaurant-v1"  # stored with cached predictions; bump when the split changes
+
+
+def restaurant_key(df: pd.DataFrame) -> pd.Series:
+    """One key per physical restaurant: the same name at the same address."""
+    norm = lambda col: df[col].astype(str).str.lower().str.replace(r"\s+", " ", regex=True).str.strip()
+    return norm("name") + " | " + norm("address")
+
+
 def split(df: pd.DataFrame):
-    train_valid, test = train_test_split(df, test_size=0.1, random_state=SEED)
+    """90/10 split with every listing of a restaurant on the same side."""
+    keys = restaurant_key(df)
+    splitter = GroupShuffleSplit(n_splits=1, test_size=0.1, random_state=SEED)
+    tv_idx, te_idx = next(splitter.split(df, groups=keys))
+    train_valid, test = df.iloc[tv_idx], df.iloc[te_idx]
+    leaked = set(keys.iloc[te_idx]) & set(keys.iloc[tv_idx])
+    assert not leaked, f"{len(leaked)} restaurants appear in both train and test"
     return train_valid, test
 
 
@@ -250,11 +268,15 @@ def main() -> None:
     cache = DATA_DIR / f"preds_{args.backend}.json"
     if args.reuse and cache.exists():
         cached = json.loads(cache.read_text())
+        if cached.get("split") != SPLIT or cached.get("test_ids") != [int(i) for i in test.index]:
+            raise SystemExit(f"{cache} was made with a different split. Run again without --reuse.")
         preds, model_name = np.array(cached["preds"]), cached["model"]
-        assert len(preds) == len(test)
     else:
         preds, model_name = (predict_api if args.backend == "api" else predict_local)(train_valid, test)
-        cache.write_text(json.dumps({"model": model_name, "preds": [float(p) for p in preds]}))
+        cache.write_text(json.dumps({
+            "model": model_name, "split": SPLIT,
+            "test_ids": [int(i) for i in test.index], "preds": [float(p) for p in preds],
+        }))
     y = test["rate"].to_numpy()
     metrics = {
         "r2": float(r2_score(y, preds)),
@@ -266,8 +288,10 @@ def main() -> None:
     print(f"{model_name}: {metrics}  ({time.time() - t0:.0f}s)")
 
     test = test.assign(_pred=preds)
-    # Random subset of the held-out test listings; the site shuffles it again.
-    sample = test.sample(n=min(args.n_samples, len(test)), random_state=SEED)
+    # One card per restaurant, so a game never shows the same place twice.
+    # Random subset of those; the site shuffles it again.
+    unique = test[~restaurant_key(test).duplicated()]
+    sample = unique.sample(n=min(args.n_samples, len(unique)), random_state=SEED)
     cards = [card(r, r["_pred"]) for _, r in sample.iterrows()]
 
     OUT_FILE.parent.mkdir(parents=True, exist_ok=True)

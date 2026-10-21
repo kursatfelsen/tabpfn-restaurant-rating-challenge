@@ -158,7 +158,7 @@
   <dialog id="how">
     <h2>How it works</h2>
     <p>Each card is a real restaurant listing from the Zomato Bangalore dataset. You see what a diner would see: votes, price, cuisine, popular dishes and customer reviews. The overall rating is hidden.</p>
-    <p>TabPFN made its prediction before you arrived. It was fitted on <b id="how-ntrain">37,498</b> other listings and never saw any of the restaurants in this game. The setup follows the Prior Labs cookbook <a href="https://docs.priorlabs.ai/cookbook/zomato_model_comparison" target="_blank" rel="noopener">Predict Restaurant Ratings with TabPFN 3.5</a>.</p>
+    <p>TabPFN made its prediction before you arrived. It was fitted on <b id="how-ntrain">37,498</b> other listings and never saw any of the restaurants in this game, not even under another listing: the data is split by restaurant, so no restaurant is on both sides. The setup follows the Prior Labs cookbook <a href="https://docs.priorlabs.ai/cookbook/zomato_model_comparison" target="_blank" rel="noopener">Predict Restaurant Ratings with TabPFN 3.5</a>.</p>
     <p>This is a regression task, so both players are scored on error, where lower is better. <b>MAE</b> is the average distance from the real rating. <b>RMSE</b> is the root mean squared error, which punishes big misses more. The player closer to the real rating wins the round.</p>
     <p><b>Free play</b> is endless. <b>Daily 15</b> gives everyone the same 15 restaurants each day, with one attempt. Both have a leaderboard ranked by MAE, and you can share your result at the end.</p>
     <p class="fine" id="how-model"></p>

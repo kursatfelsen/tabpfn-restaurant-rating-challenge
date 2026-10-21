@@ -11,10 +11,20 @@ The data and modelling follow the Prior Labs cookbook
 - Dataset: the MulTaBench curated version of the
   [Zomato Bangalore Restaurants](https://www.kaggle.com/datasets/himanshupoddar/zomato-bangalore-restaurants)
   dataset, with 41,665 rated listings.
-- Split: 80/10/10 with seed 42. TabPFN is fitted on train plus validation,
-  which is 37,498 rows.
-- Game cards are drawn only from the 4,167 held-out test listings. TabPFN
-  never saw any restaurant a player is shown.
+- Split: 90/10 train/test with seed 42, **grouped by restaurant** (name +
+  address). TabPFN is fitted on the 37,381 training rows.
+- Game cards are drawn only from the 951 held-out test restaurants, one card
+  per restaurant. TabPFN never saw any of them, under any listing.
+
+### Why the split is by restaurant
+
+The dataset lists each restaurant 4 to 5 times, once per area and category,
+almost always with the same rating. There are 41,665 rows but only 9,504
+restaurants. The cookbook's row split (`train_test_split`) puts 95% of test
+restaurants into the training data as well. On that split, just looking up a
+restaurant's training rating gets MAE 0.011, and TabPFN got 0.016. That was
+mostly recall, not prediction. `split()` in `precompute.py` uses
+`GroupShuffleSplit` and fails if any restaurant ends up on both sides.
 
 ## Scoring
 
